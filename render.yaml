@@ -1,0 +1,66 @@
+services:
+  - type: web
+    name: soulene-cag
+    runtime: python
+    plan: starter
+    region: singapore
+    branch: main
+    # rootDir: rag_implementation   # uncomment if the repo root is one level up
+    buildCommand: pip install --upgrade pip && pip install -r requirements.txt
+    # 2 workers x 4 threads; long timeout so SSE streams are not cut off.
+    startCommand: >
+      gunicorn main:app
+      --bind 0.0.0.0:$PORT
+      --workers 2
+      --threads 4
+      --timeout 120
+      --graceful-timeout 30
+      --keep-alive 5
+      --access-logfile -
+      --error-logfile -
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.7"
+      - key: OPENAI_API_KEY
+        sync: false                 # set this in the Render dashboard (secret)
+      - key: OPENAI_MODEL
+        value: gpt-4.1-mini
+      - key: OPENAI_MODERATION_MODEL
+        value: omni-moderation-latest
+      - key: LOG_LEVEL
+        value: INFO
+      - key: ENABLE_INPUT_MODERATION
+        value: "true"
+      - key: ENABLE_OUTPUT_SAFETY_CHECK
+        value: "false"              # deterministic validator always runs; LLM review off for latency
+      - key: KNOWLEDGE_TOKEN_BUDGET
+        value: "12000"
+      - key: CONTEXT_CACHE_SIZE
+        value: "100"
+      - key: PROMPT_WINDOW
+        value: "20"
+      - key: RESPONSE_CACHE_ENTRIES
+        value: "500"
+      - key: MAX_UPLOAD_MB
+        value: "10"
+      - key: EMERGENCY_NUMBER
+        value: "112"
+      - key: STRICT_UNSAFE_THRESHOLD
+        value: "3"
+      # --- Request security: set both keys in the dashboard before going public ---
+      - key: API_KEY
+        sync: false                 # client key; empty disables auth
+      - key: ADMIN_API_KEY
+        sync: false                 # required for document upload/delete
+      - key: RATE_LIMIT_PER_MINUTE
+        value: "60"
+      - key: PYTHONUNBUFFERED
+        value: "1"
+    disk:
+      # Persists the SQLite databases (chat archive, feedback), profile memory,
+      # the built knowledge cache, and uploaded documents across deploys.
+      name: soulene-data
+      mountPath: /opt/render/project/src/data
+      sizeGB: 1

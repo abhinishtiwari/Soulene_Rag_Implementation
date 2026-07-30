@@ -1,0 +1,15 @@
+# --- Core: LLM + web ---
+openai==2.9.0
+flask==3.1.0
+gunicorn==23.0.0
+
+# --- Document processing for the CAG knowledge cache ---
+PyMuPDF==1.25.5          # PDF
+python-docx==1.1.2       # DOCX
+openpyxl==3.1.5          # XLSX
+pandas==2.2.3            # CSV
+
+# NOTE: no FAISS, no sentence-transformers, no torch.
+# CAG uses an in-memory knowledge cache with a lexical index, so there is no
+# embedding model to download at boot. This keeps the Render image small and
+# cold starts fast.
