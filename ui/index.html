@@ -5,228 +5,203 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Soulene AI</title>
   <style>
-    :root {
-      --bg: #eef2ff;
-      --bg2: #f7f9fc;
-      --panel: #ffffff;
-      --user: #6366f1;
-      --user-text: #ffffff;
-      --bot: #f1f3f9;
-      --bot-text: #1f2430;
-      --muted: #7a8194;
-      --border: #e3e7f0;
-      --accent: #6366f1;
-      --accent-hover: #4f46e5;
-    }
-    * { box-sizing: border-box; }
-    html, body { height: 100%; }
-    body {
-      margin: 0;
-      display: grid;
-      place-items: center;
-      background: linear-gradient(160deg, var(--bg) 0%, var(--bg2) 60%);
-      font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
-      color: var(--bot-text);
-      padding: 16px;
-    }
-    .app {
-      width: 100%;
-      max-width: 760px;
-      height: min(88vh, 820px);
-      display: grid;
-      grid-template-rows: auto 1fr auto;
-      background: var(--panel);
-      border: 1px solid var(--border);
-      border-radius: 20px;
-      overflow: hidden;
-      box-shadow: 0 20px 60px rgba(79, 70, 229, 0.12);
-    }
-    header {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      padding: 16px 20px;
-      border-bottom: 1px solid var(--border);
-      background: linear-gradient(135deg, #6366f1, #8b5cf6);
-      color: #fff;
-    }
-    .logo {
-      width: 38px; height: 38px; border-radius: 12px;
-      background: rgba(255,255,255,0.2);
-      display: grid; place-items: center; font-size: 20px;
-    }
-    header h1 { font-size: 17px; margin: 0; font-weight: 600; }
-    header small { display:block; font-weight: 400; opacity: 0.85; font-size: 12px; }
-    .messages {
-      padding: 20px;
-      overflow-y: auto;
-      display: flex;
-      flex-direction: column;
-      gap: 12px;
-      scroll-behavior: smooth;
-    }
-    .row { display: flex; }
-    .row.user { justify-content: flex-end; }
-    .bubble {
-      max-width: 78%;
-      padding: 11px 15px;
-      border-radius: 16px;
-      line-height: 1.5;
-      white-space: pre-wrap;
-      word-wrap: break-word;
-      font-size: 15px;
-      animation: pop 0.18s ease-out;
-    }
-    @keyframes pop { from { transform: translateY(6px); opacity: 0; } to { transform: none; opacity: 1; } }
-    .row.user .bubble { background: var(--user); color: var(--user-text); border-bottom-right-radius: 5px; }
-    .row.bot .bubble { background: var(--bot); color: var(--bot-text); border-bottom-left-radius: 5px; }
-    .tag {
-      font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em;
-      color: var(--muted); margin: 2px 6px 0; align-self: flex-start;
-    }
-    .typing { display: inline-flex; gap: 4px; }
-    .typing span {
-      width: 7px; height: 7px; border-radius: 50%; background: var(--muted);
-      animation: blink 1.2s infinite both;
-    }
-    .typing span:nth-child(2){ animation-delay: .2s; }
-    .typing span:nth-child(3){ animation-delay: .4s; }
-    @keyframes blink { 0%,80%,100%{opacity:.2} 40%{opacity:1} }
-    form {
-      display: grid;
-      grid-template-columns: 1fr auto;
-      gap: 10px;
-      padding: 14px;
-      border-top: 1px solid var(--border);
-      background: #fff;
-    }
-    input {
-      width: 100%; padding: 13px 15px;
-      border: 1px solid var(--border); border-radius: 14px;
-      font-size: 15px; outline: none;
-      transition: border-color .15s, box-shadow .15s;
-    }
-    input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(99,102,241,.15); }
-    button {
-      border: none; background: var(--accent); color: #fff;
-      padding: 0 22px; border-radius: 14px; font-weight: 600; font-size: 15px;
-      cursor: pointer; transition: background .15s;
-    }
-    button:hover { background: var(--accent-hover); }
-    button:disabled { opacity: .6; cursor: not-allowed; }
-    .error { color: #b91c1c; }
+    :root { --bg:#eef2ff; --panel:#fff; --user-color:#6366f1; --user-text:#fff; --bot:#f1f3f9; --bot-text:#1f2430; --muted:#7a8194; --border:#e3e7f0; --accent:#6366f1; --accent-hover:#4f46e5; --sidebar-bg:#f8f9fd; }
+    *{box-sizing:border-box;margin:0;padding:0}html,body{height:100%}
+    body{font-family:"Segoe UI",system-ui,sans-serif;color:var(--bot-text);background:linear-gradient(160deg,var(--bg) 0%,#f7f9fc 60%)}
+    .user-select-screen{display:grid;place-items:center;height:100vh;padding:20px}
+    .user-select-card{background:var(--panel);border-radius:24px;padding:48px 40px;box-shadow:0 20px 60px rgba(79,70,229,.12);text-align:center;max-width:440px;width:100%}
+    .user-select-card .logo-big{font-size:48px;margin-bottom:12px}
+    .user-select-card h1{font-size:24px;margin-bottom:6px;background:linear-gradient(135deg,#6366f1,#8b5cf6);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+    .user-select-card p{color:var(--muted);margin-bottom:32px;font-size:14px}
+    .user-buttons{display:flex;flex-direction:column;gap:12px}
+    .user-btn{display:flex;align-items:center;gap:14px;padding:16px 20px;border:2px solid var(--border);border-radius:14px;background:#fff;cursor:pointer;transition:all .2s;font-size:16px;font-weight:500}
+    .user-btn:hover{border-color:var(--accent);background:#f5f3ff;transform:translateY(-2px);box-shadow:0 4px 12px rgba(99,102,241,.15)}
+    .user-btn .avatar{width:42px;height:42px;border-radius:50%;display:grid;place-items:center;font-size:18px;font-weight:700;color:#fff}
+    .user-btn:nth-child(1) .avatar{background:#6366f1}.user-btn:nth-child(2) .avatar{background:#8b5cf6}.user-btn:nth-child(3) .avatar{background:#ec4899}
+    .chat-app{display:none;height:100vh;grid-template-columns:260px 1fr}.chat-app.active{display:grid}
+    .sidebar{background:var(--sidebar-bg);border-right:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden}
+    .sidebar-header{padding:14px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
+    .sidebar-header .user-info{display:flex;align-items:center;gap:10px}
+    .sidebar-header .user-avatar{width:32px;height:32px;border-radius:50%;display:grid;place-items:center;font-size:13px;font-weight:700;color:#fff;background:var(--accent)}
+    .sidebar-header .user-name{font-weight:600;font-size:14px}
+    .btn-switch{background:none;border:1px solid var(--border);border-radius:8px;padding:5px 9px;font-size:11px;cursor:pointer;color:var(--muted)}
+    .btn-switch:hover{border-color:var(--accent);color:var(--accent)}
+    .btn-new{margin:12px 14px 8px;padding:10px 0;border:1px dashed var(--border);border-radius:10px;background:#fff;cursor:pointer;font-size:13px;font-weight:500;color:var(--accent)}
+    .btn-new:hover{background:#f5f3ff;border-color:var(--accent)}
+    .session-list{flex:1;overflow-y:auto;padding:6px 10px}
+    .session-item{padding:10px 12px;border-radius:9px;cursor:pointer;margin-bottom:3px;font-size:13px;display:flex;justify-content:space-between;align-items:center;transition:background .1s}
+    .session-item:hover{background:#eef0f7}.session-item.active{background:#e8e5ff;font-weight:600}
+    .session-item .title{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
+    .session-item .time{font-size:10px;color:var(--muted);margin-left:8px;white-space:nowrap}
+    .chat-panel{display:grid;grid-template-rows:auto 1fr auto;overflow:hidden}
+    .chat-header{display:flex;align-items:center;gap:12px;padding:14px 20px;border-bottom:1px solid var(--border);background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff}
+    .chat-header .logo{width:36px;height:36px;border-radius:12px;background:rgba(255,255,255,.2);display:grid;place-items:center;font-size:18px}
+    .chat-header h1{font-size:16px;font-weight:600}.chat-header small{display:block;font-weight:400;opacity:.85;font-size:11px}
+    .messages{padding:20px;overflow-y:auto;display:flex;flex-direction:column;gap:12px;scroll-behavior:smooth}
+    .row{display:flex}.row.user{justify-content:flex-end}
+    .bubble{max-width:78%;padding:11px 15px;border-radius:16px;line-height:1.5;white-space:pre-wrap;word-wrap:break-word;font-size:15px;animation:pop .18s ease-out}
+    @keyframes pop{from{transform:translateY(6px);opacity:0}to{transform:none;opacity:1}}
+    .row.user .bubble{background:var(--user-color);color:var(--user-text);border-bottom-right-radius:5px}
+    .row.bot .bubble{background:var(--bot);color:var(--bot-text);border-bottom-left-radius:5px}
+    .typing{display:inline-flex;gap:4px}.typing span{width:7px;height:7px;border-radius:50%;background:var(--muted);animation:blink 1.2s infinite both}
+    .typing span:nth-child(2){animation-delay:.2s}.typing span:nth-child(3){animation-delay:.4s}
+    @keyframes blink{0%,80%,100%{opacity:.2}40%{opacity:1}}
+    .chat-form{display:grid;grid-template-columns:1fr auto;gap:10px;padding:14px;border-top:1px solid var(--border);background:#fff}
+    .chat-form input{width:100%;padding:12px 14px;border:1px solid var(--border);border-radius:14px;font-size:15px;outline:none}
+    .chat-form input:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(99,102,241,.15)}
+    .chat-form button{border:none;background:var(--accent);color:#fff;padding:0 20px;border-radius:14px;font-weight:600;font-size:15px;cursor:pointer}
+    .chat-form button:hover{background:var(--accent-hover)}.chat-form button:disabled{opacity:.6;cursor:not-allowed}
+    .error{color:#b91c1c}
+    @media(max-width:768px){.chat-app.active{grid-template-columns:1fr}.sidebar{display:none}}
   </style>
 </head>
 <body>
-  <main class="app">
-    <header>
-      <div class="logo">💜</div>
-      <div>
-        <h1>Soulene AI</h1>
-        <small>Think Clear · Live Deep</small>
+  <!-- USER SELECTION -->
+  <div id="userSelectScreen" class="user-select-screen">
+    <div class="user-select-card">
+      <div class="logo-big">💜</div>
+      <h1>Soulene AI</h1>
+      <p>Choose your profile to continue</p>
+      <div class="user-buttons">
+        <button class="user-btn" onclick="selectUser('abhinish','Abhinish')"><div class="avatar">A</div><span>Abhinish</span></button>
+        <button class="user-btn" onclick="selectUser('chirag','Chirag')"><div class="avatar">C</div><span>Chirag</span></button>
+        <button class="user-btn" onclick="selectUser('joy','Joy')"><div class="avatar">J</div><span>Joy</span></button>
       </div>
-    </header>
+    </div>
+  </div>
 
-    <section id="messages" class="messages" aria-live="polite"></section>
-
-    <form id="form" autocomplete="off">
-      <input id="input" type="text" placeholder="Share what's on your mind..." required />
-      <button id="send" type="submit">Send</button>
-    </form>
-  </main>
+  <!-- CHAT APP -->
+  <div id="chatApp" class="chat-app">
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <div class="user-info">
+          <div class="user-avatar" id="sidebarAvatar">A</div>
+          <span class="user-name" id="sidebarName">Abhinish</span>
+        </div>
+        <button class="btn-switch" onclick="switchUser()">Switch</button>
+      </div>
+      <button class="btn-new" onclick="createNewChat()">+ New Chat</button>
+      <div class="session-list" id="sessionList"></div>
+    </aside>
+    <div class="chat-panel">
+      <header class="chat-header">
+        <div class="logo">💜</div>
+        <div><h1>Soulene AI</h1><small>Think Clear · Live Deep</small></div>
+      </header>
+      <section id="messages" class="messages"></section>
+      <form id="chatForm" class="chat-form" autocomplete="off">
+        <input id="chatInput" type="text" placeholder="Share what's on your mind..." required />
+        <button id="sendBtn" type="submit">Send</button>
+      </form>
+    </div>
+  </div>
 
   <script>
-    const messagesEl = document.getElementById('messages');
-    const form = document.getElementById('form');
-    const input = document.getElementById('input');
-    const send = document.getElementById('send');
-    const sessionId = 'web-' + Math.random().toString(36).slice(2, 12);
+    let activeUserId=null, activeUserName=null, activeSessionId=null, sessions=[];
+    const messagesEl=document.getElementById('messages');
+    const chatForm=document.getElementById('chatForm');
+    const chatInput=document.getElementById('chatInput');
+    const sendBtn=document.getElementById('sendBtn');
+    const sessionList=document.getElementById('sessionList');
 
-    function addMessage(text, role) {
-      const row = document.createElement('div');
-      row.className = 'row ' + role;
-      const bubble = document.createElement('div');
-      bubble.className = 'bubble';
-      bubble.textContent = text;
-      row.appendChild(bubble);
-      messagesEl.appendChild(row);
-      messagesEl.scrollTop = messagesEl.scrollHeight;
-      return bubble;
+    function selectUser(id,name){
+      activeUserId=id; activeUserName=name;
+      document.getElementById('sidebarAvatar').textContent=name[0];
+      document.getElementById('sidebarName').textContent=name;
+      document.getElementById('userSelectScreen').style.display='none';
+      document.getElementById('chatApp').classList.add('active');
+      loadSessions();
+    }
+    function switchUser(){
+      activeUserId=null;activeUserName=null;activeSessionId=null;sessions=[];
+      messagesEl.innerHTML='';sessionList.innerHTML='';
+      document.getElementById('chatApp').classList.remove('active');
+      document.getElementById('userSelectScreen').style.display='grid';
     }
 
-    function addTyping() {
-      const row = document.createElement('div');
-      row.className = 'row bot';
-      row.innerHTML = '<div class="bubble"><span class="typing"><span></span><span></span><span></span></span></div>';
-      messagesEl.appendChild(row);
-      messagesEl.scrollTop = messagesEl.scrollHeight;
-      return row;
+    async function loadSessions(){
+      try{
+        const r=await fetch(`/sessions?user_id=${activeUserId}`);
+        const d=await r.json();
+        sessions=d.sessions||[];
+        renderSessionList();
+        if(sessions.length>0) loadSession(sessions[0].session_id);
+        else await createNewChat();
+      }catch(e){
+        activeSessionId=activeUserId+'-'+Date.now();
+        showWelcome();
+      }
+      if(!activeSessionId){activeSessionId=activeUserId+'-'+Date.now();showWelcome();}
     }
 
-    // Stream the reply token-by-token via SSE (POST + ReadableStream reader).
-    async function streamMessage(message, bubble) {
-      const res = await fetch('/chat/stream', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message, session_id: sessionId, user_id: sessionId })
+    function renderSessionList(){
+      sessionList.innerHTML='';
+      sessions.forEach(s=>{
+        const div=document.createElement('div');
+        div.className='session-item'+(s.session_id===activeSessionId?' active':'');
+        const title=s.title||'New Chat';
+        const t=s.updated_at?formatTime(s.updated_at):'';
+        div.innerHTML=`<span class="title">${esc(title)}</span><span class="time">${t}</span>`;
+        div.onclick=()=>loadSession(s.session_id);
+        sessionList.appendChild(div);
       });
-      if (!res.ok || !res.body) throw new Error('Request failed');
-
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
-      let text = '';
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const events = buffer.split('\n\n');
-        buffer = events.pop();
-        for (const evt of events) {
-          const line = evt.replace(/^data:\s?/, '');
-          if (line === '[DONE]') return text;
-          try {
-            const obj = JSON.parse(line);
-            if (obj.delta) {
-              text += obj.delta;
-              bubble.textContent = text;
-              messagesEl.scrollTop = messagesEl.scrollHeight;
-            }
-          } catch (_) { /* ignore partial frames */ }
-        }
-      }
-      return text;
     }
 
-    form.addEventListener('submit', async (e) => {
+    async function createNewChat(){
+      try{
+        const r=await fetch('/sessions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user_id:activeUserId})});
+        const d=await r.json();
+        if(d.session&&d.session.session_id){sessions.unshift(d.session);activeSessionId=d.session.session_id;renderSessionList();messagesEl.innerHTML='';showWelcome();return;}
+      }catch(e){}
+      activeSessionId=activeUserId+'-'+Date.now();messagesEl.innerHTML='';showWelcome();
+    }
+
+    async function loadSession(sid){
+      activeSessionId=sid;renderSessionList();messagesEl.innerHTML='';
+      try{
+        const r=await fetch(`/sessions/${sid}?user_id=${activeUserId}`);
+        const d=await r.json();
+        if(d.messages&&d.messages.length>0) d.messages.forEach(m=>addMsg(m.content,m.role==='user'?'user':'bot'));
+        else showWelcome();
+      }catch(e){showWelcome();}
+    }
+
+    function showWelcome(){addMsg(`Hi ${activeUserName||'there'}, I'm Soulene AI. I'm here to listen and support you. How are you feeling today?`,'bot');}
+
+    function addMsg(text,role){
+      const row=document.createElement('div');row.className='row '+role;
+      const b=document.createElement('div');b.className='bubble';b.textContent=text;
+      row.appendChild(b);messagesEl.appendChild(row);messagesEl.scrollTop=messagesEl.scrollHeight;return b;
+    }
+    function addTyping(){
+      const row=document.createElement('div');row.className='row bot';
+      row.innerHTML='<div class="bubble"><span class="typing"><span></span><span></span><span></span></span></div>';
+      messagesEl.appendChild(row);messagesEl.scrollTop=messagesEl.scrollHeight;return row;
+    }
+
+    chatForm.addEventListener('submit',async e=>{
       e.preventDefault();
-      const message = input.value.trim();
-      if (!message) return;
-      addMessage(message, 'user');
-      input.value = '';
-      send.disabled = true;
-      const typing = addTyping();
-      let bubble = null;
-      try {
-        const text = await streamMessage(message, {
-          get bubble() { return bubble; },
-          set textContent(v) {
-            if (!bubble) { typing.remove(); bubble = addMessage('', 'bot'); }
-            bubble.textContent = v;
-          }
-        });
-        if (!bubble) { typing.remove(); addMessage(text || 'No reply received.', 'bot'); }
-      } catch (err) {
-        typing.remove();
-        const b = addMessage('Something went wrong. Please try again.', 'bot');
-        b.classList.add('error');
-      } finally {
-        send.disabled = false;
-        input.focus();
-      }
+      const msg=chatInput.value.trim();
+      if(!msg||!activeUserId||!activeSessionId)return;
+      addMsg(msg,'user');chatInput.value='';sendBtn.disabled=true;
+      const typing=addTyping();
+      try{
+        const res=await fetch('/chat/stream',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:msg,session_id:activeSessionId,user_id:activeUserId})});
+        if(!res.ok||!res.body)throw new Error('fail');
+        typing.remove();const bubble=addMsg('','bot');
+        const reader=res.body.getReader();const dec=new TextDecoder();
+        let buf='',text='';
+        while(true){const{value,done}=await reader.read();if(done)break;buf+=dec.decode(value,{stream:true});const evts=buf.split('\n\n');buf=evts.pop();for(const evt of evts){const line=evt.replace(/^data:\s?/,'');if(line==='[DONE]')break;try{const o=JSON.parse(line);if(o.delta){text+=o.delta;bubble.textContent=text;messagesEl.scrollTop=messagesEl.scrollHeight;}}catch(_){}}}
+        if(!text)bubble.textContent='No reply received.';
+        // Update sidebar
+        const s=sessions.find(x=>x.session_id===activeSessionId);
+        if(s&&(s.title==='New Chat'||!s.title)){s.title=msg.slice(0,40);s.updated_at=Date.now()/1000;renderSessionList();}
+      }catch(err){typing.remove();const b=addMsg('Something went wrong. Please try again.','bot');b.classList.add('error');}
+      finally{sendBtn.disabled=false;chatInput.focus();}
     });
 
-    addMessage("Hi, I'm Soulene AI. I'm here to listen and support you. How are you feeling today?", 'bot');
+    function esc(s){const d=document.createElement('div');d.textContent=s;return d.innerHTML;}
+    function formatTime(ts){const d=new Date(ts*1000),n=new Date();if(d.toDateString()===n.toDateString())return d.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});return d.toLocaleDateString([],{month:'short',day:'numeric'});}
   </script>
 </body>
 </html>

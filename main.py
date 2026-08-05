@@ -87,7 +87,7 @@ _auth = ApiAuth(_settings.api_key, _settings.admin_api_key)
 _limiter = RateLimiter(_settings.rate_limit_per_minute)
 
 # Endpoints that never require auth (probes + UI shell).
-_OPEN_PATHS = {"/health", "/"}
+_OPEN_PATHS = {"/health", "/", "/sessions"}
 
 
 def _client_identity() -> str:
@@ -103,6 +103,13 @@ def _client_identity() -> str:
 def _guard_request():
     if request.method == "OPTIONS" or request.path in _OPEN_PATHS:
         return None
+    # Allow session sub-routes and chat without auth for the UI
+    if request.path.startswith("/sessions"):
+        return None
+    if request.path.startswith("/chat"):
+        data = request.get_json(silent=True) or {}
+        if data.get("user_id"):
+            return None
 
     if _auth.enabled:
         presented = ApiAuth.extract_key(request.headers, request.args)
@@ -258,6 +265,76 @@ def delete_document(name: str):
             if p.is_file():
                 p.unlink(missing_ok=True)
         return jsonify({"status": "removed", "document": safe}), 200
+    except Exception:
+        return jsonify({"error": "delete failed"}), 500
+
+
+# ---------------------------------------------------------------------------
+# Sessions (JSON-backed multi-session management)
+# ---------------------------------------------------------------------------
+@app.get("/sessions")
+def list_sessions():
+    """List all sessions for a user."""
+    user_id = request.args.get("user_id", "").strip()
+    if not user_id:
+        return jsonify({"error": "user_id is required"}), 400
+    try:
+        svc = get_service()
+        sessions = svc.archive.list_sessions(user_id)
+        return jsonify({"user_id": user_id, "sessions": sessions}), 200
+    except Exception:
+        return jsonify({"user_id": user_id, "sessions": []}), 200
+
+
+@app.post("/sessions")
+def create_session():
+    """Create a new chat session for a user."""
+    data = request.get_json(silent=True) or {}
+    _, user_id = _ids(data)
+    try:
+        svc = get_service()
+        session = svc.archive.create_session(user_id)
+        return jsonify({"status": "created", "session": session}), 201
+    except Exception:
+        session_id = f"{user_id}-{uuid.uuid4().hex[:12]}"
+        return jsonify({"status": "created", "session": {
+            "session_id": session_id, "user_id": user_id,
+            "title": "New Chat", "created_at": time.time(),
+            "updated_at": time.time(), "last_message": ""
+        }}), 201
+
+
+@app.get("/sessions/<session_id>")
+def get_session_detail(session_id: str):
+    """Get a specific session with its messages."""
+    user_id = request.args.get("user_id", "").strip()
+    if not user_id:
+        return jsonify({"error": "user_id is required"}), 400
+    try:
+        svc = get_service()
+        messages = svc.archive.fetch_recent(user_id, session_id, limit=100)
+        msg_list = [
+            {"role": m.role, "content": m.content, "created_at": m.created_at,
+             "message_id": m.message_id}
+            for m in messages
+        ]
+        return jsonify({"session_id": session_id, "messages": msg_list}), 200
+    except Exception:
+        return jsonify({"session_id": session_id, "messages": []}), 200
+
+
+@app.delete("/sessions/<session_id>")
+def delete_session(session_id: str):
+    """Delete a session and its messages."""
+    user_id = request.args.get("user_id", "").strip()
+    if not user_id:
+        data = request.get_json(silent=True) or {}
+        _, user_id = _ids(data)
+    try:
+        svc = get_service()
+        svc.archive.delete_conversation(user_id, session_id)
+        svc.clear(session_id)
+        return jsonify({"status": "deleted"}), 200
     except Exception:
         return jsonify({"error": "delete failed"}), 500
 

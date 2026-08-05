@@ -396,7 +396,8 @@ def build_chatbot(settings: Optional[Settings] = None, *, client: Optional[LLMCl
     profile = LongTermMemory(storage_dir=settings.root / "data" / "profiles")
     response_builder = ResponseBuilder(settings, guardrails, refusal, crisis, client)
     try:
-        archive = ChatArchive(settings.root / "data" / "chat_archive.sqlite3")
+        from app.storage.chat_archive_json import ChatArchiveJSON
+        archive = ChatArchiveJSON(settings.root / "data" / "chats")
     except Exception:
         archive = None
 
