@@ -105,6 +105,10 @@ class Settings:
     # --- Emergency ---
     emergency_number: str = "112"
 
+    # --- MongoDB Atlas (production storage) ---
+    mongo_uri: str = ""
+    db_name: str = "soulene_db"
+
     # --- Paths (relative to PROJECT_ROOT) ---
     knowledge_dir: str = "knowledge"
     vector_store_dir: str = "vector_store"
@@ -144,6 +148,8 @@ class Settings:
             rate_limit_per_minute=_get_int(env, "RATE_LIMIT_PER_MINUTE", cls.rate_limit_per_minute),
             max_recent_turns=_get_int(env, "MAX_RECENT_TURNS", cls.max_recent_turns),
             emergency_number=_get(env, "EMERGENCY_NUMBER", cls.emergency_number),
+            mongo_uri=_get(env, "MONGO_URI"),
+            db_name=_get(env, "DB_NAME", cls.db_name),
         )
 
     def require_api_key(self) -> None:

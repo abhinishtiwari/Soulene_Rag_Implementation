@@ -9,6 +9,10 @@ python-docx==1.1.2       # DOCX
 openpyxl==3.1.5          # XLSX
 pandas==2.2.3            # CSV
 
+# --- Database (MongoDB Atlas on Render) ---
+pymongo[srv]==4.7.3
+certifi>=2024.2.2
+
 # NOTE: no FAISS, no sentence-transformers, no torch.
 # CAG uses an in-memory knowledge cache with a lexical index, so there is no
 # embedding model to download at boot. This keeps the Render image small and

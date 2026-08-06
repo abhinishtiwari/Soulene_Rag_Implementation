@@ -42,6 +42,7 @@ from app.types import (
     ResponseStrategy,
     Route,
     SafetyLevel,
+    Turn,
 )
 from app.utils import clean_message, strip_markdown
 
@@ -74,6 +75,9 @@ class ChatbotService:
         message = clean_message(user_message)
         if not message:
             return ChatResult(reply="I'm here whenever you're ready.", route=Route.SUPPORT)
+
+        # FIX: Prime context cache from archive if empty (prevents "forgetting context")
+        self._ensure_context_loaded(user_id, session_id)
 
         strategy = self._analyze(session_id, message)
         self._ingest_user_turn(user_id, session_id, message, strategy)
@@ -108,6 +112,9 @@ class ChatbotService:
         if not message:
             yield "I'm here whenever you're ready."
             return
+
+        # FIX: Prime context cache from archive if empty (prevents "forgetting context")
+        self._ensure_context_loaded(user_id, session_id)
 
         strategy = self._analyze(session_id, message)
         self._ingest_user_turn(user_id, session_id, message, strategy)
@@ -355,6 +362,27 @@ class ChatbotService:
             except Exception:
                 pass
 
+    def _ensure_context_loaded(self, user_id: str, session_id: str) -> None:
+        """Prime the in-memory context cache from the archive if it's empty.
+
+        This fixes the 'forgetting context' bug: after a server restart or when
+        a session is first accessed, the context cache is empty. Without this,
+        the bot has no memory of previous messages in the session.
+        """
+        cached = self.cag.context.all_cached(session_id)
+        if cached:
+            return  # Already loaded
+        if self.archive is None:
+            return
+        try:
+            # Load the last N messages from the persistent archive
+            messages = self.archive.fetch_recent(user_id, session_id, limit=self.settings.context_cache_size)
+            if messages:
+                turns = [Turn(role=m.role, content=m.content) for m in messages]
+                self.cag.context.prime(session_id, turns)
+        except Exception:
+            pass
+
     def _fallback(self, language: Language) -> str:
         if language == Language.HINDI:
             return "मुझे अभी एक छोटा technical issue आ रहा है, लेकिन मैं यहीं तुम्हारे साथ हूँ।"
@@ -393,13 +421,43 @@ def build_chatbot(settings: Optional[Settings] = None, *, client: Optional[LLMCl
         except Exception:
             pass
 
-    profile = LongTermMemory(storage_dir=settings.root / "data" / "profiles")
+    # --- Storage: MongoDB if MONGO_URI configured, else JSON files ---
+    archive = None
+    profile = None
+    mongo_db = None
+
+    if settings.mongo_uri and settings.db_name:
+        try:
+            from app.storage.mongo_client import get_mongo_db
+            mongo_db = get_mongo_db(settings.mongo_uri, settings.db_name)
+        except Exception:
+            mongo_db = None
+
+    if mongo_db is not None:
+        # Production (Render): use MongoDB
+        try:
+            from app.storage.chat_archive_mongo import ChatArchiveMongo
+            archive = ChatArchiveMongo(mongo_db)
+        except Exception:
+            pass
+        try:
+            from app.memory.long_term_memory_mongo import LongTermMemoryMongo
+            profile = LongTermMemoryMongo(mongo_db)
+        except Exception:
+            profile = LongTermMemory(storage_dir=settings.root / "data" / "profiles")
+    else:
+        # Local development: use JSON files
+        profile = LongTermMemory(storage_dir=settings.root / "data" / "profiles")
+        try:
+            from app.storage.chat_archive_json import ChatArchiveJSON
+            archive = ChatArchiveJSON(settings.root / "data" / "chats")
+        except Exception:
+            pass
+
+    if profile is None:
+        profile = LongTermMemory(storage_dir=settings.root / "data" / "profiles")
+
     response_builder = ResponseBuilder(settings, guardrails, refusal, crisis, client)
-    try:
-        from app.storage.chat_archive_json import ChatArchiveJSON
-        archive = ChatArchiveJSON(settings.root / "data" / "chats")
-    except Exception:
-        archive = None
 
     return ChatbotService(
         settings=settings, client=client, analyzer=analyzer, guardrails=guardrails,
