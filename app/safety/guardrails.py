@@ -158,7 +158,22 @@ class Guardrails:
     _hidden_distress = re.compile(
         r"\b(no point (in )?(living|anymore)|what'?s the point|don'?t want to be here"
         r"|want it to (stop|end)|can'?t do this anymore|tired of living|give up on life"
-        r"|everyone.{0,15}better off without me|disappear forever|nothing matters anymore)\b",
+        r"|everyone.{0,15}better off without me|disappear forever|nothing matters anymore"
+        # ISS-11: expanded common phrasings of indirect despair
+        r"|don'?t see the point( anymore)?"
+        r"|nothing (seems|feels|is) worth it"
+        r"|i'?m done (trying|with everything|with life|with this)"
+        r"|wish i could (just )?disappear"
+        r"|don'?t care what happens to me"
+        r"|wouldn'?t matter if i (wasn'?t|weren'?t) here"
+        r"|everyone would be (fine|better|okay) without me"
+        r"|what'?s the use"
+        r"|i give up"
+        r"|i can'?t keep going"
+        r"|no reason to (keep going|stay|be here|live)"
+        r"|i'?m done with everything"
+        r"|there'?s no point|there is no point"
+        r"|life (isn'?t|is not) worth (it|living))\b",
         re.I,
     )
 
@@ -167,19 +182,20 @@ class Guardrails:
         # Any "set aside your instructions" phrasing, not just "ignore".
         r"((?:ignore|disregard|forget|override|bypass|skip|discard|drop|erase|abandon|"
         r"disobey|unlearn|set aside)\s+(?:all |any |the |your |these |those )*"
-        r"(?:previous|prior|above|earlier|initial|original|existing|system|preceding)?\s*"
-        r"(?:instructions?|rules?|prompts?|guidelines?|constraints?|restrictions?|directives?|training)"
+        r"(?:previous|prior|above|earlier|initial|original|existing|system|preceding|safety)?\s*"
+        r"(?:instructions?|rules?|prompts?|guidelines?|constraints?|restrictions?|directives?|training|scripts?|filters?)"
         r"|bypass (?:your )?safety|developer mode|dev mode|dan mode|jailbreak"
         r"|pretend (?:you have|there are) no rules|act as (?:if )?(?:you have no rules|the developer)"
         r"|you are (?:now )?(?:the )?(?:developer|admin|root)"
         r"|reset your (?:rules|instructions|prompt)"
-        r"|(?:new|updated) (?:system )?(?:instructions?|prompt)\s*:)",
+        r"|(?:new|updated) (?:system )?(?:instructions?|prompt)\s*:"
+        r"|drop (?:the |your )?(?:safety|act|persona|character))",
         re.I,
     )
     # Attempts to extract / reveal the hidden prompt or config.
     _prompt_extraction = re.compile(
         r"(reveal|show|share|print|output|repeat|tell me|give me|display|reveal to me)\b"
-        r".{0,40}\b(system prompt|hidden (instructions|rules|prompt)|your (instructions|rules|prompt|config"
+        r".{0,40}\b(system prompt|hidden (instructions|rules|prompt)|your (\w+ )?(instructions|rules|prompt|config"
         r"|configuration|guidelines|first (line|instruction)|initial prompt)|everything above"
         r"|prompt above|the text above|your setup|secret instructions)"
         r"|repeat everything above|what (are|were) your (instructions|rules)"
@@ -249,9 +265,11 @@ class Guardrails:
     # such as "i g n o r e a l l p r e v i o u s i n s t r u c t i o n s",
     # where word boundaries cannot be recovered.
     _COMPACT_INJECTION = re.compile(
-        r"(ignore(all)?(previous|prior|the)?instructions?|disregard(all)?(previous)?instructions?"
+        r"(ignore(all)?(previous|prior|the|your|my)?instructions?|disregard(all)?(previous|your)?instructions?"
+        r"|ignoreyour(rules?|instructions?|prompts?|guidelines?)"
         r"|systemprompt|hiddeninstructions?|revealyourinstructions?|showyourprompt"
-        r"|developermode|danmode|jailbreak|repeateverythingabove|yourinstructionsare)",
+        r"|developermode|danmode|jailbreak|repeateverythingabove|yourinstructionsare"
+        r"|forgetyour(rules?|instructions?)|bypassyour(safety|rules?|filters?))",
         re.I,
     )
     _COMPACT_SELF_HARM = re.compile(
@@ -261,10 +279,14 @@ class Guardrails:
     )
 
     def _compact_match(self, pattern: re.Pattern, message: str) -> bool:
-        """Match a whitespace-free signature. Only meaningful for spaced input."""
-        if not message or " " not in message:
+        """Match a whitespace-free signature. Catches ZWSP-split and spaced input."""
+        if not message:
             return False
-        return bool(pattern.search(despace(message)))
+        # Run compact match on any message that might contain invisible chars or spaces
+        despaced = despace(message)
+        if not despaced:
+            return False
+        return bool(pattern.search(despaced))
 
     def decide(self, message: str, language: Language,
                moderation: ModerationSignal) -> SafetyDecision:
@@ -455,7 +477,15 @@ class Guardrails:
     def _is_programming_request(self, lowered: str) -> bool:
         if self._code_block.search(lowered):
             return True
-        return bool(self._programming_terms.search(lowered) and self._programming_intent.search(lowered))
+        # ISS-09 FIX: Only trigger off-topic programming refusal when message has
+        # programming terms + instruction pattern BUT NO emotional keywords.
+        # If any distress/emotion is present, it's an emotional conversation
+        # about code — not a request for code help.
+        if self._programming_terms.search(lowered) and self._programming_intent.search(lowered):
+            if self._distress.search(lowered):
+                return False  # "my python assignment is stressing me out" = in-domain
+            return True
+        return False
 
     # ------------------------------------------------------------------
     # Output safety: screen a generated reply before it reaches the user.

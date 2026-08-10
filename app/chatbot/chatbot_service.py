@@ -1,13 +1,15 @@
 """ChatbotService - CAG-based mental health companion pipeline.
 
 Per turn:
-    clean -> moderate -> Analyzer (deterministic strategy)
+    clean -> restore transcript + safety state -> moderate
+      -> conversation-level semantic risk fusion
+      -> Analyzer (response strategy)
       -> SAFETY gate            (crisis: no humour, no cache, no knowledge)
       -> hard refusals          (harmful / sexual)
       -> CAG lookup            (response cache -> knowledge cache)
-           * response-cache hit  = ZERO LLM calls
-           * knowledge injected  = ONE LLM call
-      -> single main LLM call   (compact prompt)
+           * response-cache hit  = zero response-generation calls
+           * knowledge injected  = one response-generation call
+      -> main LLM call when needed (compact prompt)
       -> light output validation
       -> persist: context cache + profile memory + chat archive (async)
 
@@ -31,6 +33,7 @@ from app.memory.long_term_memory import LongTermMemory
 from app.prompts.system_prompt import build_instructions, build_model_input
 from app.safety.crisis import CrisisHandler
 from app.safety.guardrails import Guardrails
+from app.safety.reasoner import ConversationRiskReasoner
 from app.safety.refusal import RefusalHandler
 from app.storage.chat_archive import ChatArchive
 from app.types import (
@@ -40,6 +43,7 @@ from app.types import (
     Language,
     ModerationSignal,
     ResponseStrategy,
+    RiskAssessment,
     Route,
     SafetyLevel,
     Turn,
@@ -54,7 +58,8 @@ class ChatbotService:
     def __init__(self, *, settings: Settings, client: Optional[LLMClient],
                  analyzer: Analyzer, guardrails: Guardrails, refusal: RefusalHandler,
                  crisis: CrisisHandler, cag: CAGEngine, profile: LongTermMemory,
-                 response_builder: ResponseBuilder, archive: Optional[ChatArchive]):
+                 response_builder: ResponseBuilder, archive: Optional[ChatArchive],
+                 risk_reasoner: Optional[ConversationRiskReasoner] = None):
         self.settings = settings
         self.client = client
         self.analyzer = analyzer
@@ -65,6 +70,8 @@ class ChatbotService:
         self.profile = profile
         self.response_builder = response_builder
         self.archive = archive
+        self.risk_reasoner = risk_reasoner or ConversationRiskReasoner(
+            settings, guardrails, client)
 
     # ------------------------------------------------------------------
     # Public API
@@ -76,18 +83,34 @@ class ChatbotService:
         if not message:
             return ChatResult(reply="I'm here whenever you're ready.", route=Route.SUPPORT)
 
-        # FIX: Prime context cache from archive if empty (prevents "forgetting context")
-        self._ensure_context_loaded(user_id, session_id)
+        context_id = self._context_id(user_id, session_id)
+        self._ensure_context_loaded(user_id, session_id, context_id)
+        history = self.cag.context.all_cached(context_id)
+        moderation = self._moderate(message)
+        risk = self.risk_reasoner.assess(
+            session_id=session_id, latest_message=message, history=history,
+            moderation=moderation,
+            previous_state=self.cag.context.safety_state(context_id),
+        )
+        # Safety reasoning and its durable state are complete before any reply.
+        self.cag.context.set_safety_state(context_id, risk.to_dict())
+        self._persist_safety_state(user_id, session_id, risk)
+        strategy = self._analyze(context_id, message, moderation, risk)
 
-        strategy = self._analyze(session_id, message)
-        self._ingest_user_turn(user_id, session_id, message, strategy)
-
-        route, reply, lookup = self._respond(session_id, user_id, message, strategy)
+        route, reply, lookup = self._respond(
+            session_id, user_id, context_id, message, strategy)
         reply = strip_markdown(reply) or self._fallback(strategy.language)
 
-        self._ingest_assistant_turn(user_id, session_id, reply)
+        # Persist a complete pair after generation so prompt history contains the
+        # current message exactly once and failed generations do not leave orphans.
+        self._ingest_user_turn(user_id, session_id, context_id, message, strategy)
+        self._ingest_assistant_turn(user_id, session_id, context_id, reply)
 
-        # Cache factual answers only (never emotional replies).
+        # FIX: Refresh the rolling summary unconditionally after every turn pair.
+        # Previously this only ran inside _build_prompt(), so crisis/refusal/cache-hit
+        # paths never updated the summary — causing context loss after 50+ responses.
+        self._refresh_summary(context_id)
+
         if (route == Route.SUPPORT and strategy.intent in _CACHEABLE_INTENTS
                 and lookup is not None and not lookup.cache_hit):
             self.cag.store_answer(message, reply, lookup.sources)
@@ -97,6 +120,8 @@ class ChatbotService:
             used_rag=bool(lookup and (lookup.knowledge_hit or lookup.cache_hit)),
             retrieved=[], notes=[f"intent={strategy.intent.value}",
                                  f"emotion={strategy.emotion}",
+                                 f"risk_source={risk.source}",
+                                 f"cumulative_risk={risk.cumulative_score:.2f}",
                                  f"cache_hit={bool(lookup and lookup.cache_hit)}"],
             safety_level=strategy.safety_level, intent=strategy.intent,
             used_memory=strategy.memory_required,
@@ -107,65 +132,15 @@ class ChatbotService:
 
     def handle_stream(self, session_id: str, user_message: str, *,
                       user_id: Optional[str] = None) -> Iterator[str]:
-        user_id = user_id or session_id
-        message = clean_message(user_message)
-        if not message:
-            yield "I'm here whenever you're ready."
-            return
+        """Emit only a fully assessed and validated reply.
 
-        # FIX: Prime context cache from archive if empty (prevents "forgetting context")
-        self._ensure_context_loaded(user_id, session_id)
+        SSE remains API-compatible, but safety-sensitive model deltas are buffered
+        by using the same completed pipeline as the non-streaming endpoint.
+        """
+        yield self.handle(session_id, user_message, user_id=user_id).reply
 
-        strategy = self._analyze(session_id, message)
-        self._ingest_user_turn(user_id, session_id, message, strategy)
-
-        # Cached factual answer -> emit instantly, zero LLM calls.
-        lookup = self._lookup(message, strategy)
-        if lookup.cached_answer:
-            self._ingest_assistant_turn(user_id, session_id, lookup.cached_answer)
-            yield lookup.cached_answer
-            return
-
-        # Turns needing deterministic post-checks are NOT streamed — the
-        # validators must run before any text reaches the user.
-        streamable = (
-            self.client is not None
-            and strategy.safety_level == SafetyLevel.SAFE
-            and not strategy.medical_request
-            and strategy.intent not in (Intent.HARMFUL, Intent.SEXUAL,
-                                        Intent.OFF_TOPIC, Intent.INJECTION,
-                                        Intent.MEDICAL_REQUEST, Intent.DIAGNOSIS_REQUEST,
-                                        Intent.CLARIFY)
-        )
-        if not streamable:
-            route, reply, _ = self._respond(session_id, user_id, message, strategy, lookup=lookup)
-            reply = strip_markdown(reply) or self._fallback(strategy.language)
-            self._ingest_assistant_turn(user_id, session_id, reply)
-            yield reply
-            return
-
-        instructions, input_text = self._build_prompt(session_id, user_id, message, strategy, lookup)
-        acc: List[str] = []
-        try:
-            for delta in self.client.generate_stream(
-                    instructions=instructions, input_text=input_text, session_id=session_id):
-                acc.append(delta)
-                yield delta
-        except Exception:
-            if not acc:
-                fb = self._fallback(strategy.language)
-                acc.append(fb)
-                yield fb
-
-        full = strip_markdown("".join(acc)) or self._fallback(strategy.language)
-        full = self.response_builder.scrub_leak(full, strategy.language)
-        full = self._enforce_reply_policy(full, strategy)
-        self._ingest_assistant_turn(user_id, session_id, full)
-        if strategy.intent in _CACHEABLE_INTENTS and not lookup.cache_hit:
-            self.cag.store_answer(message, full, lookup.sources)
-
-    def clear(self, session_id: str) -> None:
-        self.cag.context.clear(session_id)
+    def clear(self, session_id: str, user_id: Optional[str] = None) -> None:
+        self.cag.context.clear(self._context_id(user_id or session_id, session_id))
 
     def stats(self) -> dict:
         return self.cag.stats()
@@ -173,46 +148,49 @@ class ChatbotService:
     # ------------------------------------------------------------------
     # Pipeline stages
     # ------------------------------------------------------------------
-    def _analyze(self, session_id: str, message: str) -> ResponseStrategy:
-        moderation = self._moderate(message)
-        history = self.cag.context.all_cached(session_id)
-        strategy = self.analyzer.analyze(message, moderation, history=history)
+    def _analyze(self, context_id: str, message: str,
+                 moderation: ModerationSignal,
+                 risk: RiskAssessment) -> ResponseStrategy:
+        history = self.cag.context.all_cached(context_id)
+        strategy = self.analyzer.analyze(
+            message, moderation, history=history, risk_assessment=risk)
 
         if strategy.intent in (Intent.INJECTION, Intent.OFF_TOPIC):
-            count = self.cag.context.bump(session_id, strategy.intent.value)
-            strategy = self.analyzer.analyze(message, moderation, history=history,
-                                             repeated_behaviour=count > 1,
-                                             repetition_count=count)
+            count = self.cag.context.bump(context_id, strategy.intent.value)
+            strategy = self.analyzer.analyze(
+                message, moderation, history=history,
+                repeated_behaviour=count > 1, repetition_count=count,
+                risk_assessment=risk)
 
-        # --- session safety state (ported from legacy) ---
-        # 1) Once a sexual boundary is set, later intimacy probes stay refused.
         if strategy.intent == Intent.SEXUAL:
-            self.cag.context.bump(session_id, "sexual_boundary")
-        elif (self.cag.context.counter(session_id, "sexual_boundary") > 0
+            self.cag.context.bump(context_id, "sexual_boundary")
+        elif (self.cag.context.counter(context_id, "sexual_boundary") > 0
               and self.guardrails.is_sexual_procedural(message)):
             strategy.intent = Intent.SEXUAL
 
-        # 2) Repeated unsafe attempts -> strict mode (harden, never soften).
         if strategy.intent in (Intent.HARMFUL, Intent.SEXUAL, Intent.INJECTION):
-            attempts = self.cag.context.bump(session_id, "unsafe_attempts")
+            attempts = self.cag.context.bump(context_id, "unsafe_attempts")
             if attempts >= self.settings.strict_unsafe_threshold:
                 strategy.humour = 0
                 strategy.emoji = "none"
         return strategy
 
-    def _ingest_user_turn(self, user_id, session_id, message, strategy) -> None:
+    def _ingest_user_turn(self, user_id, session_id, context_id,
+                          message, strategy) -> None:
         self._archive(user_id, session_id, "user", message)
-        self.cag.context.append(session_id, "user", message)
-        if (strategy.safety_level == SafetyLevel.SAFE
-                and strategy.intent not in (Intent.INJECTION, Intent.HARMFUL, Intent.SEXUAL)):
+        self.cag.context.append(context_id, "user", message)
+        # ISS-06 FIX: Store memories from ALL messages EXCEPT injection/harmful/sexual.
+        # Important personal details are often shared during vulnerable moments
+        # (e.g. "my dad has cancer", "my friend died"). These MUST be remembered.
+        if strategy.intent not in (Intent.INJECTION, Intent.HARMFUL, Intent.SEXUAL):
             try:
                 self.profile.observe(user_id, message)
             except Exception:
-                pass  # memory failure must never break chat
+                pass
 
-    def _ingest_assistant_turn(self, user_id, session_id, reply) -> None:
+    def _ingest_assistant_turn(self, user_id, session_id, context_id, reply) -> None:
         self._archive(user_id, session_id, "assistant", reply)
-        self.cag.context.append(session_id, "assistant", reply)
+        self.cag.context.append(context_id, "assistant", reply)
 
     def _lookup(self, message: str, strategy: ResponseStrategy):
         # Knowledge is available for info questions even if the user is distressed
@@ -229,42 +207,52 @@ class ChatbotService:
             from app.cag.cag_engine import CAGLookup
             return CAGLookup()  # cache failure -> degrade to plain generation
 
-    def _respond(self, session_id, user_id, message, strategy, lookup=None):
-        """Return (route, reply, lookup)."""
-        # 1) SAFETY FIRST.
+    def _respond(self, session_id, user_id, context_id, message, strategy, lookup=None):
+        """Return (route, fully validated reply, lookup)."""
         if strategy.safety_level.is_crisis:
-            return (Route.CRISIS,
-                    self.crisis.respond(strategy.language, message, session_id,
-                                        safety_level=strategy.safety_level),
-                    None)
+            reply = self.crisis.respond(
+                strategy.language, message, session_id,
+                safety_level=strategy.safety_level,
+                assessment=strategy.risk_assessment,
+            )
+            return Route.CRISIS, self._finalize_reply(
+                session_id, message, reply, strategy), None
 
-        # 2) Deterministic hard refusals.
         if strategy.intent == Intent.HARMFUL:
-            return Route.REFUSAL, self.refusal.respond("harmful", strategy.language), None
+            reply = self.refusal.respond("harmful", strategy.language)
+            return Route.REFUSAL, self._finalize_reply(
+                session_id, message, reply, strategy), None
         if strategy.intent == Intent.SEXUAL:
-            return Route.REFUSAL, self.refusal.respond("sexual", strategy.language), None
+            reply = self.refusal.respond("sexual", strategy.language)
+            return Route.REFUSAL, self._finalize_reply(
+                session_id, message, reply, strategy), None
 
-        # 2b) Helpline: the number must be authoritative, never model-invented.
         if strategy.intent == Intent.HELPLINE_REQUEST:
-            return (Route.SUPPORT,
-                    self.response_builder.helpline_reply(
-                        strategy.language, self.settings.emergency_number),
-                    None)
+            reply = self.response_builder.helpline_reply(
+                strategy.language, self.settings.emergency_number)
+            return Route.SUPPORT, self._finalize_reply(
+                session_id, message, reply, strategy), None
 
-        # 3) CAG lookup.
         if lookup is None:
             lookup = self._lookup(message, strategy)
         if lookup.cached_answer:
-            return Route.SUPPORT, lookup.cached_answer, lookup
+            reply = self._finalize_reply(
+                session_id, message, lookup.cached_answer, strategy)
+            return Route.SUPPORT, reply, lookup
 
-        # 4) Single LLM call.
-        reply = self._generate(session_id, user_id, message, strategy, lookup)
-        reply = self.response_builder.apply_output_safety(
-            session_id=session_id, user_message=message, reply=reply,
-            language=strategy.language)
-        reply = self._enforce_reply_policy(reply, strategy)
+        reply = self._generate(
+            session_id, user_id, context_id, message, strategy, lookup)
+        reply = self._finalize_reply(session_id, message, reply, strategy)
         route = Route.REFUSAL if strategy.intent == Intent.INJECTION else Route.SUPPORT
         return route, reply, lookup
+
+    def _finalize_reply(self, session_id: str, message: str, reply: str,
+                        strategy: ResponseStrategy) -> str:
+        reply = self.response_builder.apply_output_safety(
+            session_id=session_id, user_message=message, reply=reply,
+            language=strategy.language,
+            risk_assessment=strategy.risk_assessment)
+        return self._enforce_reply_policy(reply, strategy)
 
     def _enforce_reply_policy(self, reply: str, strategy: ResponseStrategy) -> str:
         """Deterministic post-checks ported from the legacy output walls."""
@@ -283,7 +271,9 @@ class ChatbotService:
     # ------------------------------------------------------------------
     # Rolling summary: keeps continuity when messages scroll out of the
     # prompt window, without ever sending the whole transcript.
-    # Built deterministically (no extra LLM call) from the overflow turns.
+    # ISS-01/04 FIX: Use LLM to generate a rich narrative summary that
+    # preserves specific details (names, events, timelines) instead of
+    # just broad topic keywords.
     # ------------------------------------------------------------------
     _SUMMARY_TOPICS = (
         ("work stress", ("work", "job", "boss", "office", "deadline", "career")),
@@ -299,6 +289,17 @@ class ChatbotService:
         ("burnout", ("burnout", "burned out", "drained", "no energy")),
     )
 
+    _SUMMARY_INSTRUCTION = (
+        "Summarize what this person shared in 3-5 sentences. Focus on:\n"
+        "- Their name (if mentioned)\n"
+        "- Specific people they mentioned (names, relationships)\n"
+        "- What they're going through (specific events, not just categories)\n"
+        "- Any decisions or commitments they made\n"
+        "- Their stated communication preferences\n"
+        "- Timeline markers (dates, durations)\n"
+        "Do NOT give advice. Only summarize what they said. Be specific, not generic."
+    )
+
     def _refresh_summary(self, session_id: str) -> None:
         """Update the rolling summary from turns that fell out of the window."""
         ctx = self.cag.context
@@ -310,6 +311,26 @@ class ChatbotService:
         blob = " ".join(t.content.lower() for t in overflow if t.role == "user")
         if not blob:
             return
+
+        # ISS-01/04 FIX: Try LLM-based summary for rich context preservation.
+        if self.client is not None:
+            try:
+                overflow_text = "\n".join(
+                    f"{'User' if t.role == 'user' else 'Soulene'}: {t.content}"
+                    for t in overflow
+                )
+                summary = self.client.generate(
+                    instructions=self._SUMMARY_INSTRUCTION,
+                    input_text=overflow_text[:3000],
+                    session_id=f"{session_id}_summary",
+                )
+                if summary and len(summary.strip()) > 20:
+                    ctx.set_summary(session_id, summary.strip()[:500])
+                    return
+            except Exception:
+                pass  # Fall back to keyword-based summary below
+
+        # Fallback: keyword-based summary (original logic)
         topics = [label for label, keys in self._SUMMARY_TOPICS
                   if any(k in blob for k in keys)]
         if not topics:
@@ -317,7 +338,7 @@ class ChatbotService:
         summary = "Earlier they talked about: " + ", ".join(topics[:5]) + "."
         ctx.set_summary(session_id, summary)
 
-    def _build_prompt(self, session_id, user_id, message, strategy, lookup):
+    def _build_prompt(self, session_id, user_id, context_id, message, strategy, lookup):
         memories, contradictions = [], []
         if strategy.memory_required:
             try:
@@ -325,21 +346,25 @@ class ChatbotService:
                 contradictions = self.profile.contradiction_topics(user_id, message)
             except Exception:
                 memories, contradictions = [], []
-        self._refresh_summary(session_id)
+        # Summary is now refreshed unconditionally in handle() after every turn,
+        # so no need to call _refresh_summary here.
         instructions = build_instructions(strategy)
-        history = self.cag.context.formatted_window(session_id)
+        # The current turn has not been appended yet, so it appears exactly once
+        # through `message` rather than being duplicated in recent history.
+        history = self.cag.context.formatted_window(context_id)
         input_text = build_model_input(
             message, history, lookup.knowledge_context if lookup else "",
             memories=memories, contradictions=contradictions,
-            session_summary=self.cag.context.summary(session_id) or None,
+            session_summary=self.cag.context.summary(context_id) or None,
             knowledge_missing=bool(lookup and strategy.rag_required and not lookup.knowledge_hit),
         )
         return instructions, input_text
 
-    def _generate(self, session_id, user_id, message, strategy, lookup) -> str:
+    def _generate(self, session_id, user_id, context_id, message, strategy, lookup) -> str:
         if self.client is None:
             return self._fallback(strategy.language)
-        instructions, input_text = self._build_prompt(session_id, user_id, message, strategy, lookup)
+        instructions, input_text = self._build_prompt(
+            session_id, user_id, context_id, message, strategy, lookup)
         try:
             reply = self.client.generate(instructions=instructions, input_text=input_text,
                                          session_id=session_id)
@@ -362,26 +387,63 @@ class ChatbotService:
             except Exception:
                 pass
 
-    def _ensure_context_loaded(self, user_id: str, session_id: str) -> None:
-        """Prime the in-memory context cache from the archive if it's empty.
+    @staticmethod
+    def _context_id(user_id: str, session_id: str) -> str:
+        # Preserve legacy keys when user/session are identical; otherwise use a
+        # collision-resistant, ownership-scoped in-memory key.
+        if user_id == session_id:
+            return session_id
+        return f"{len(user_id)}:{user_id}{session_id}"
 
-        This fixes the 'forgetting context' bug: after a server restart or when
-        a session is first accessed, the context cache is empty. Without this,
-        the bot has no memory of previous messages in the session.
-        """
-        cached = self.cag.context.all_cached(session_id)
-        if cached:
-            return  # Already loaded
+    def _persist_safety_state(self, user_id: str, session_id: str,
+                              risk: RiskAssessment) -> None:
+        save = getattr(self.archive, "save_safety_state", None)
+        if callable(save):
+            try:
+                state = risk.to_dict()
+                # ISS-13 FIX: Also persist counters and summary for restart resilience.
+                context_id = self._context_id(user_id, session_id)
+                counters = self.cag.context.get_counters(context_id)
+                if counters:
+                    state["counters"] = counters
+                summary = self.cag.context.summary(context_id)
+                if summary:
+                    state["summary"] = summary
+                save(user_id, session_id, state)
+            except Exception:
+                pass
+
+    def _ensure_context_loaded(self, user_id: str, session_id: str,
+                               context_id: Optional[str] = None) -> None:
+        """Restore transcript and cumulative safety state for this owner/session."""
+        context_id = context_id or self._context_id(user_id, session_id)
         if self.archive is None:
             return
-        try:
-            # Load the last N messages from the persistent archive
-            messages = self.archive.fetch_recent(user_id, session_id, limit=self.settings.context_cache_size)
-            if messages:
-                turns = [Turn(role=m.role, content=m.content) for m in messages]
-                self.cag.context.prime(session_id, turns)
-        except Exception:
-            pass
+        if not self.cag.context.all_cached(context_id):
+            try:
+                messages = self.archive.fetch_recent(
+                    user_id, session_id, limit=self.settings.context_cache_size)
+                if messages:
+                    turns = [Turn(role=m.role, content=m.content) for m in messages]
+                    self.cag.context.prime(context_id, turns)
+            except Exception:
+                pass
+        if not self.cag.context.safety_state(context_id):
+            load = getattr(self.archive, "load_safety_state", None)
+            if callable(load):
+                try:
+                    state = load(user_id, session_id)
+                    if state:
+                        self.cag.context.set_safety_state(context_id, state)
+                        # ISS-13 FIX: Restore counters and summary from persisted state.
+                        if "counters" in state:
+                            self.cag.context.restore_counters(
+                                context_id, state["counters"])
+                        if "summary" in state and state["summary"]:
+                            self.cag.context.set_summary(
+                                context_id, state["summary"])
+                except Exception:
+                    pass
 
     def _fallback(self, language: Language) -> str:
         if language == Language.HINDI:

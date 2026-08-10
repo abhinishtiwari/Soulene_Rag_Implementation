@@ -27,8 +27,41 @@ _STOPWORDS = {
     "in", "is", "it", "a", "an", "i", "feel", "feeling", "today", "just",
 }
 
+# ISS-05 FIX: Domain-specific synonym map for bridging common vocabulary gaps.
+_SYNONYMS: Dict[str, List[str]] = {
+    "career": ["work", "job", "profession", "occupation"],
+    "work": ["career", "job", "profession"],
+    "job": ["work", "career", "profession"],
+    "study": ["exam", "college", "school", "assignment", "university"],
+    "exam": ["study", "test", "assessment"],
+    "college": ["university", "school", "study"],
+    "school": ["college", "university", "study"],
+    "partner": ["girlfriend", "boyfriend", "wife", "husband", "spouse"],
+    "girlfriend": ["partner", "gf"],
+    "boyfriend": ["partner", "bf"],
+    "wife": ["partner", "spouse"],
+    "husband": ["partner", "spouse"],
+    "mom": ["mother", "mum", "mama"],
+    "mother": ["mom", "mum", "mama"],
+    "dad": ["father", "papa"],
+    "father": ["dad", "papa"],
+    "anxious": ["anxiety", "nervous", "worried", "stressed"],
+    "anxiety": ["anxious", "nervous", "worried"],
+    "stressed": ["stress", "overwhelmed", "burned"],
+    "stress": ["stressed", "overwhelmed", "pressure"],
+    "sad": ["depressed", "unhappy", "low", "down"],
+    "depressed": ["sad", "depression", "low"],
+    "lonely": ["alone", "isolated", "loneliness"],
+    "alone": ["lonely", "isolated"],
+    "sleep": ["insomnia", "rest", "awake", "tired"],
+    "tired": ["exhausted", "drained", "fatigue", "sleep"],
+}
+
 # Conservative extraction patterns for STABLE, user-beneficial facts only.
-_NAME = re.compile(r"\b(?:my name is|call me|i am|i'?m|mera naam|mujhe log bulate hain)\s+([a-z][a-z '\-]{1,30})", re.I)
+# Conservative extraction patterns for STABLE, user-beneficial facts only.
+# NOTE: "i am"/"i'm" removed from name detection — too many false positives
+# (e.g. "I'm a student" would incorrectly extract "a student" as a name).
+_NAME = re.compile(r"\b(?:my name is|call me|mera naam|mujhe log bulate hain)\s+([a-z][a-z '\-]{1,30})", re.I)
 _PREF = re.compile(r"\b(i (?:like|love|enjoy|prefer|hate|dislike|can'?t stand)\s+[a-z].{2,40})", re.I)
 _CONTEXT = re.compile(
     r"\b(i (?:work as|study|am studying|have (?:exams?|an interview|a deadline)|live in|am a)\s+[a-z].{2,50})",
@@ -145,13 +178,36 @@ class LongTermMemory:
             return []
         q = _tokens(message)
         if not q:
-            return []
+            # ISS-05 FIX: Even with no tokens, always return name + style memories.
+            always = [m for m in mem if m.kind in ("name", "communication_style")]
+            return always[:k_min] if always else []
+
+        # ISS-05 FIX: Expand query tokens with domain-specific synonyms.
+        expanded_q = set(q)
+        for token in q:
+            if token in _SYNONYMS:
+                expanded_q.update(_SYNONYMS[token])
+
         scored = []
         for item in mem:
-            overlap = len(q & _tokens(item.text))
-            if overlap > 0 or item.kind == "name":
-                score = overlap + (0.5 if item.kind == "name" else 0) + 0.1 * item.weight
-                scored.append((score, item))
+            item_tokens = _tokens(item.text)
+            # Score using both original and expanded tokens
+            direct_overlap = len(q & item_tokens)
+            synonym_overlap = len((expanded_q - q) & item_tokens)
+            # Direct matches score full, synonym matches score 0.6
+            overlap = direct_overlap + (synonym_overlap * 0.6)
+
+            # ISS-05 FIX: Always include name and communication_style memories
+            if item.kind in ("name", "communication_style"):
+                score = overlap + 1.0 + 0.1 * item.weight
+            elif overlap > 0:
+                # ISS-05 FIX: Recency boost — recently updated memories rank higher
+                recency_bonus = min(0.3, 0.1 * (item.updated_at / (time.time() or 1)))
+                score = overlap + 0.1 * item.weight + recency_bonus
+            else:
+                continue
+            scored.append((score, item))
+
         scored.sort(key=lambda x: x[0], reverse=True)
         selected = [item for s, item in scored if s > 0]
         if not selected:

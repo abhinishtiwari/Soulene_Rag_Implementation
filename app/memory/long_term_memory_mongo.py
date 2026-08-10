@@ -21,7 +21,7 @@ _STOPWORDS = {
 }
 
 # Same extraction patterns as the JSON version (imported logic unchanged)
-_NAME = re.compile(r"\b(?:my name is|call me|i am|i'?m|mera naam|mujhe log bulate hain)\s+([a-z][a-z '\-]{1,30})", re.I)
+_NAME = re.compile(r"\b(?:my name is|call me|mera naam|mujhe log bulate hain)\s+([a-z][a-z '\-]{1,30})", re.I)
 _PREF = re.compile(r"\b(i (?:like|love|enjoy|prefer|hate|dislike|can'?t stand)\s+[a-z].{2,40})", re.I)
 _CONTEXT = re.compile(r"\b(i (?:work as|study|am studying|have (?:exams?|an interview|a deadline)|live in|am a)\s+[a-z].{2,50})", re.I)
 _RELATION = re.compile(r"\b((?:my )?(?:mother|father|mom|dad|sister|brother|wife|husband|partner|girlfriend|boyfriend|friend|boss)\b.{0,50})", re.I)
