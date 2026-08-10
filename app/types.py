@@ -40,6 +40,7 @@ class SafetyLevel(str, Enum):
     EMOTIONAL_DISTRESS = "emotional_distress"
     SELF_HARM_CONCERN = "self_harm_concern"
     IMMINENT_SELF_HARM = "imminent_self_harm"
+    PHYSICAL_DANGER = "physical_danger"
     HARM_TO_OTHERS = "harm_to_others"
     ABUSE_OR_DANGER = "abuse_or_danger"
 
@@ -48,9 +49,59 @@ class SafetyLevel(str, Enum):
         return self in {
             SafetyLevel.SELF_HARM_CONCERN,
             SafetyLevel.IMMINENT_SELF_HARM,
+            SafetyLevel.PHYSICAL_DANGER,
             SafetyLevel.HARM_TO_OTHERS,
             SafetyLevel.ABUSE_OR_DANGER,
         }
+
+
+class RiskDisposition(str, Enum):
+    """Constrained response decision produced before reply generation."""
+
+    NORMAL = "normal"
+    SUPPORT = "support"
+    URGENT_SAFETY = "urgent_safety"
+    EMERGENCY = "emergency"
+    REFUSE_HARMFUL = "refuse_harmful"
+    REFUSE_SEXUAL = "refuse_sexual"
+
+
+@dataclass
+class RiskAssessment:
+    """Structured conversation-level safety result; contains no chain-of-thought."""
+
+    safety_level: "SafetyLevel" = SafetyLevel.SAFE
+    disposition: "RiskDisposition" = RiskDisposition.NORMAL
+    semantic_intent: str = "ordinary_conversation"
+    emotional_state: str = "neutral"
+    emotional_trajectory: str = "stable"
+    overall_score: float = 0.0
+    cumulative_score: float = 0.0
+    self_harm_score: float = 0.0
+    physical_danger_score: float = 0.0
+    harm_to_others_score: float = 0.0
+    emotional_distress_score: float = 0.0
+    hazards: List[str] = field(default_factory=list)
+    compound_factors: List[str] = field(default_factory=list)
+    evidence: List[str] = field(default_factory=list)
+    immediate_actions: List[str] = field(default_factory=list)
+    intoxication_or_impairment: bool = False
+    access_to_means: bool = False
+    timing_immediate: bool = False
+    isolation: bool = False
+    farewell_or_finality: bool = False
+    hopelessness: bool = False
+    unsafe_framing: bool = False
+    prompt_injection: bool = False
+    danger_resolved: bool = False
+    uncertainty: float = 0.0
+    source: str = "deterministic"
+
+    def to_dict(self) -> Dict[str, object]:
+        data = dict(self.__dict__)
+        data["safety_level"] = self.safety_level.value
+        data["disposition"] = self.disposition.value
+        return data
 
 
 class Intent(str, Enum):
@@ -109,6 +160,7 @@ class ResponseStrategy:
     emotional_pattern: bool = False    # recurring theme across the conversation
     previous_advice: bool = False      # last reply already gave advice/steps
     avoid_techniques: List[str] = field(default_factory=list)  # anti-repetition ladder
+    risk_assessment: Optional["RiskAssessment"] = None
 
     def __post_init__(self):
         if self.safety_level is None:

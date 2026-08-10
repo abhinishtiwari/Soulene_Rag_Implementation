@@ -109,6 +109,11 @@ def _guard_request():
     if request.path.startswith("/chat"):
         data = request.get_json(silent=True) or {}
         if data.get("user_id"):
+            # ISS-14 WARNING: user_id is currently client-supplied with no
+            # server-side verification. In production, this MUST be replaced
+            # with JWT/session-based auth where user_id is extracted from a
+            # verified token. Any client can currently impersonate any user.
+            # TODO: Implement proper authentication (JWT or signed session cookie).
             return None
 
     if _auth.enabled:
@@ -136,6 +141,11 @@ def health():
 
 @app.get("/metrics")
 def metrics():
+    # ISS-18 FIX: Require authentication for metrics endpoint.
+    if _auth.enabled:
+        presented = ApiAuth.extract_key(request.headers, request.args)
+        if not _auth.check(presented):
+            return jsonify({"error": "unauthorized"}), 401
     try:
         return jsonify(get_service().stats()), 200
     except Exception as exc:
@@ -167,12 +177,11 @@ def chat():
         return jsonify({"reply": "Sorry, something went wrong. Please try again."}), 500
     log.info("chat ok intent=%s safety=%s latency=%.2fs",
              result.intent.value, result.safety_level.value, time.time() - t0)
+    # ISS-17 FIX: Only return reply and route in production. Internal classification
+    # details (intent, safety_level) are removed to prevent attacker feedback loops.
     return jsonify({
         "reply": result.reply,
         "route": result.route.value,
-        "intent": result.intent.value,
-        "safety_level": result.safety_level.value,
-        "used_knowledge": result.used_rag,
         "latency_ms": int((time.time() - t0) * 1000),
     })
 
@@ -333,7 +342,7 @@ def delete_session(session_id: str):
     try:
         svc = get_service()
         svc.archive.delete_conversation(user_id, session_id)
-        svc.clear(session_id)
+        svc.clear(session_id, user_id=user_id)
         return jsonify({"status": "deleted"}), 200
     except Exception:
         return jsonify({"error": "delete failed"}), 500

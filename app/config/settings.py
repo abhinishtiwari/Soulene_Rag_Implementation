@@ -75,6 +75,10 @@ class Settings:
 
     # --- Safety toggles ---
     enable_input_moderation: bool = True
+    # A separate, structured conversation-level semantic assessment runs before
+    # response generation. Deterministic guardrails remain the authoritative floor.
+    enable_semantic_safety: bool = True
+    semantic_safety_max_chars: int = 40000
     # Optional SECOND LLM reviewer on outgoing replies. Off by default: the
     # deterministic validator (prompt-leak scrub + hard safety block) always
     # runs, so this would be a duplicate reviewer costing an extra LLM call.
@@ -133,6 +137,8 @@ class Settings:
             primary_model=_get(env, "OPENAI_MODEL", cls.primary_model),
             moderation_model=_get(env, "OPENAI_MODERATION_MODEL", cls.moderation_model),
             enable_input_moderation=_get_bool(env, "ENABLE_INPUT_MODERATION", cls.enable_input_moderation),
+            enable_semantic_safety=_get_bool(env, "ENABLE_SEMANTIC_SAFETY", cls.enable_semantic_safety),
+            semantic_safety_max_chars=_get_int(env, "SEMANTIC_SAFETY_MAX_CHARS", cls.semantic_safety_max_chars),
             enable_output_safety_check=_get_bool(env, "ENABLE_OUTPUT_SAFETY_CHECK", cls.enable_output_safety_check),
             embedding_model=_get(env, "EMBEDDING_MODEL", cls.embedding_model),
             chunk_size=_get_int(env, "CHUNK_SIZE", cls.chunk_size),

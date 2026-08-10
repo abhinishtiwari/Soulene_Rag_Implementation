@@ -1,90 +1,82 @@
-"""Crisis handling: human-first, calm, safety-oriented.
+"""Deterministic, risk-aware crisis response planning.
 
-Prefers an LLM-generated contextual response (matching the reference bot's warm,
-non-scripted tone) and falls back to a deterministic safe template if the LLM
-is unavailable.
+Immediate safety actions are selected from a constrained taxonomy produced by
+the pre-response risk assessor. Crisis correctness never depends on generation.
 """
-
 from __future__ import annotations
 
 from typing import Optional
 
 from app.config.settings import Settings
 from app.llm.client import LLMClient
-from app.types import Language
+from app.types import Language, RiskAssessment, SafetyLevel
 
+_ACTIONS_EN = {
+    "move_away_from_danger": "Please move away from the immediate danger and get to a safer place now.",
+    "stop_hazard_and_get_to_safety": "Stop the hazardous situation if you safely can, then get to safety now.",
+    "avoid_driving_or_more_substances": "Please do not drive or take anything more; stay with a sober person.",
+    "reduce_access_to_means": "Put distance between you and anything you could use to hurt yourself.",
+    "contact_trusted_person": "Call a trusted person and ask them to stay with you now.",
+    "contact_emergency_services": "If the danger is immediate, call {number} now.",
+    "seek_urgent_medical_help": "Please get urgent medical help now.",
+    "keep_distance_from_others": "Step away from the other person and from anything that could cause harm.",
+}
 
-_CRISIS_INSTRUCTIONS = (
-    "You are a crisis safety companion inside a mental well-being app. "
-    "The user may be at risk of self-harm or in immediate danger. "
-    "Respond like a warm human beside them, not a script.\n"
-    "1. Start with a short human interruption (e.g. 'Hey... wait, I'm here with you.').\n"
-    "2. Briefly acknowledge the intensity without assumptions.\n"
-    "3. Gently encourage reaching a trusted person, acknowledging they may not feel like it.\n"
-    "4. Ask ONLY ONE simple question about immediate safety (e.g. 'Where are you right now?').\n"
-    "5. Mention emergency help only if immediate danger seems clear.\n"
-    "Keep sentences short, calm, present. No generic motivational lines. "
-    "Do not assume the reason. Do not ask multiple questions. Do not sound like a robot."
-)
-
+_ACTIONS_HI = {
+    "move_away_from_danger": "Abhi danger se door hokar kisi safe jagah par jao.",
+    "stop_hazard_and_get_to_safety": "Agar safely kar sakte ho to hazard roko, phir turant safe jagah jao.",
+    "avoid_driving_or_more_substances": "Drive mat karo aur kuch aur mat lo; kisi sober person ke saath raho.",
+    "reduce_access_to_means": "Jo cheez hurt kar sakti hai usse door ho jao.",
+    "contact_trusted_person": "Abhi kisi trusted person ko call karke apne paas bulao.",
+    "contact_emergency_services": "Agar danger immediate hai to abhi {number} call karo.",
+    "seek_urgent_medical_help": "Abhi urgent medical help lo.",
+    "keep_distance_from_others": "Dusre person aur harm karne wali cheezon se door ho jao.",
+}
 
 class CrisisHandler:
     def __init__(self, settings: Settings, client: Optional[LLMClient] = None):
         self.settings = settings
-        self.client = client
+        self.client = client  # retained for constructor compatibility; not trusted here
 
-    def respond(self, language: Language, user_message: str = "", session_id: str = "crisis",
-                safety_level=None) -> str:
-        if self.client is None:
-            return self._fallback(language)
-        lang_hint = {
-            Language.HINDI: "Reply in Hindi.",
-            Language.HINGLISH: "Reply in Hinglish (Roman script).",
-            Language.ENGLISH: "Reply in English.",
-        }.get(language, "Reply in English.")
+    def respond(self, language: Language, user_message: str = "",
+                session_id: str = "crisis", safety_level=None,
+                assessment: Optional[RiskAssessment] = None) -> str:
+        level = safety_level or (assessment.safety_level if assessment else
+                                 SafetyLevel.SELF_HARM_CONCERN)
+        actions = list(assessment.immediate_actions if assessment else [])
+        if not actions:
+            actions = (["move_away_from_danger", "contact_emergency_services"]
+                       if level == SafetyLevel.PHYSICAL_DANGER
+                       else ["reduce_access_to_means", "contact_trusted_person"])
+        pool = _ACTIONS_HI if language in (Language.HINDI, Language.HINGLISH) else _ACTIONS_EN
+        steps = []
+        for key in actions[:2]:
+            text = pool.get(key)
+            if text:
+                steps.append(text.format(number=self.settings.emergency_number))
 
-        extra = ""
-        try:
-            from app.types import SafetyLevel
-            if safety_level == SafetyLevel.HARM_TO_OTHERS:
-                extra = (" The user may want to harm someone else. Stay calm and non-judgmental, "
-                         "help them pause, and gently discourage harm while keeping others safe.")
-            elif safety_level == SafetyLevel.ABUSE_OR_DANGER:
-                extra = (" The user may be experiencing abuse or be in danger from someone else. "
-                         "Validate them, make clear it is not their fault and not okay, and gently "
-                         "encourage reaching a trusted person or the emergency number if unsafe now.")
-            elif safety_level == SafetyLevel.IMMINENT_SELF_HARM:
-                extra = " There may be immediate danger. Gently and clearly encourage emergency help now."
-        except Exception:
-            pass
+        if language == Language.HINDI:
+            opening = "मैं अभी आपके साथ हूँ। अभी safety सबसे ज़रूरी है।"
+            question = "क्या आप अभी danger से दूर और किसी safe person के साथ हैं?"
+        elif language == Language.HINGLISH:
+            opening = "Main abhi tumhare saath hoon. Abhi safety sabse important hai."
+            question = "Kya tum abhi danger se door aur kisi safe person ke saath ho?"
+        else:
+            opening = "I'm with you right now. Your immediate safety comes first."
+            question = "Are you away from the danger and with a safe person right now?"
 
-        instructions = (
-            f"{_CRISIS_INSTRUCTIONS}{extra} Emergency number to reference if needed: "
-            f"{self.settings.emergency_number}. {lang_hint}"
-        )
-        try:
-            return self.client.generate(
-                instructions=instructions,
-                input_text=f"User message:\n{user_message.strip()}\n\nReturn only the reply text.",
-                session_id=f"{session_id}:crisis",
-                temperature=0.6,
-            )
-        except Exception:
-            return self._fallback(language)
+        if level == SafetyLevel.HARM_TO_OTHERS:
+            if language in (Language.HINDI, Language.HINGLISH):
+                question = "Kya tum abhi us person se door aur safe jagah par ho?"
+            else:
+                question = "Are you away from that person and in a safe place right now?"
+        elif level == SafetyLevel.ABUSE_OR_DANGER:
+            if language in (Language.HINDI, Language.HINGLISH):
+                question = "Kya tum abhi us person se door kisi safe jagah par ho?"
+            else:
+                question = "Are you somewhere safe and away from that person right now?"
+
+        return " ".join([opening, *steps, question]).strip()
 
     def _fallback(self, language: Language) -> str:
-        num = self.settings.emergency_number
-        if language == Language.HINDI:
-            return (
-                "मैं अभी तुम्हारे साथ हूँ। क्या तुम इस समय सुरक्षित हो?\n\n"
-                f"अगर तुम्हें लगता है कि तुम खुद को नुकसान पहुँचा सकते हो, तो अभी किसी भरोसेमंद व्यक्ति को कॉल करो या {num} पर संपर्क करो।"
-            )
-        if language == Language.HINGLISH:
-            return (
-                "Main abhi yahin hoon tumhare saath. Kya tum iss waqt safe ho?\n\n"
-                f"Agar lag raha hai ki tum khud ko hurt kar sakte ho, to abhi kisi trusted person ko call karo ya {num} par contact karo."
-            )
-        return (
-            "I'm here with you right now. Are you safe in this moment?\n\n"
-            f"If you might act on this, please reach a trusted person now, or contact {num} if you are in immediate danger."
-        )
+        return self.respond(language)

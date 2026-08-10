@@ -89,6 +89,27 @@ class ChatArchiveMongo:
     def flush(self, timeout=None):
         pass
 
+    def save_safety_state(self, user_id: str, conversation_id: str, state: dict) -> None:
+        try:
+            self._sessions.update_one(
+                {"user_id": user_id, "session_id": conversation_id},
+                {"$set": {"safety_state": dict(state or {}), "updated_at": time.time()},
+                 "$setOnInsert": {"created_at": time.time(), "title": "New Chat"}},
+                upsert=True,
+            )
+        except Exception:
+            pass
+
+    def load_safety_state(self, user_id: str, conversation_id: str) -> dict:
+        try:
+            row = self._sessions.find_one(
+                {"user_id": user_id, "session_id": conversation_id},
+                projection={"_id": 0, "safety_state": 1},
+            )
+            return dict((row or {}).get("safety_state") or {})
+        except Exception:
+            return {}
+
     def close(self):
         pass
 

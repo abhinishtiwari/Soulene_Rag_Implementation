@@ -23,6 +23,7 @@ class ConversationState:
     turns: Deque[Turn] = field(default_factory=deque)
     summary: str = ""
     counters: Dict[str, int] = field(default_factory=dict)
+    safety_state: Dict[str, object] = field(default_factory=dict)
     dropped: int = 0
 
 
@@ -91,6 +92,14 @@ class ContextCache:
         with self._lock:
             self._state(conversation_id).summary = (summary or "").strip()
 
+    def safety_state(self, conversation_id: str) -> Dict[str, object]:
+        with self._lock:
+            return dict(self._state(conversation_id).safety_state)
+
+    def set_safety_state(self, conversation_id: str, state: Dict[str, object]) -> None:
+        with self._lock:
+            self._state(conversation_id).safety_state = dict(state or {})
+
     def needs_summary(self, conversation_id: str) -> bool:
         """True when messages have scrolled past the prompt window."""
         with self._lock:
@@ -117,6 +126,21 @@ class ContextCache:
     def counter(self, conversation_id: str, key: str) -> int:
         with self._lock:
             return self._state(conversation_id).counters.get(key, 0)
+
+    # ISS-13 FIX: Methods to persist/restore counters across worker restarts.
+    def get_counters(self, conversation_id: str) -> Dict[str, int]:
+        with self._lock:
+            return dict(self._state(conversation_id).counters)
+
+    def restore_counters(self, conversation_id: str, counters: Dict[str, int]) -> None:
+        """Restore counters from persisted state (e.g. after restart)."""
+        if not counters or not isinstance(counters, dict):
+            return
+        with self._lock:
+            st = self._state(conversation_id)
+            if not st.counters:  # Only restore if not already populated
+                st.counters = {k: int(v) for k, v in counters.items()
+                               if isinstance(v, (int, float))}
 
     def clear(self, conversation_id: str) -> None:
         with self._lock:

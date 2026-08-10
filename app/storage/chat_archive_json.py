@@ -75,6 +75,7 @@ class ChatArchiveJSON:
             "user_id": user_id,
             "created_at": time.time(),
             "messages": [],
+            "safety_state": {},
         }
 
     def _save_session(self, user_id: str, conversation_id: str, data: dict) -> None:
@@ -119,6 +120,17 @@ class ChatArchiveJSON:
     def close(self) -> None:
         """No-op."""
         pass
+
+    def save_safety_state(self, user_id: str, conversation_id: str, state: dict) -> None:
+        with self._lock:
+            data = self._load_session(user_id, conversation_id)
+            data["safety_state"] = dict(state or {})
+            self._save_session(user_id, conversation_id, data)
+
+    def load_safety_state(self, user_id: str, conversation_id: str) -> dict:
+        with self._lock:
+            data = self._load_session(user_id, conversation_id)
+        return dict(data.get("safety_state") or {})
 
     # ------------------------------------------------------------------
     # Reads (always user-scoped)
@@ -201,6 +213,7 @@ class ChatArchiveJSON:
             "user_id": user_id,
             "created_at": time.time(),
             "messages": [],
+            "safety_state": {},
         }
         with self._lock:
             self._save_session(user_id, session_id, data)

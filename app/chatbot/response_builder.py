@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import random
 import re
 from typing import Optional
@@ -15,7 +16,7 @@ from app.prompts.system_prompt import (
 from app.safety.crisis import CrisisHandler
 from app.safety.guardrails import Guardrails
 from app.safety.refusal import RefusalHandler
-from app.types import Language, ModerationSignal
+from app.types import Language, ModerationSignal, RiskAssessment, SafetyLevel
 
 
 class ResponseBuilder:
@@ -193,35 +194,73 @@ class ResponseBuilder:
                 "what actually helps.")
 
     def apply_output_safety(self, *, session_id: str, user_message: str, reply: str,
-                            language: Language) -> str:
-        """Hard-block obviously unsafe output; optionally LLM-review borderline output."""
-        # 0) Deterministic prompt-leak scrub.
+                            language: Language,
+                            risk_assessment: Optional[RiskAssessment] = None) -> str:
+        """Validate the exact text that will be delivered and archived."""
         reply = self.scrub_leak(reply, language)
-        # 1) Deterministic hard block first (never trust the model on the worst cases).
+
+        # Optional style/policy editor runs before the mandatory final checks.
+        if self.settings.enable_output_safety_check and self.client is not None:
+            try:
+                edited = self.client.generate(
+                    instructions=OUTPUT_REVIEW_SYSTEM_PROMPT,
+                    input_text=build_output_review_input(user_message, reply),
+                    session_id=f"{session_id}:review", temperature=0.0,
+                    max_output_tokens=self.settings.max_output_tokens,
+                )
+                reply = edited or reply
+            except Exception:
+                pass
+
         moderation = ModerationSignal()
         if self.settings.enable_input_moderation and self.client is not None:
             try:
                 moderation = self.client.moderate(reply)
             except Exception:
-                moderation = ModerationSignal()
-
+                pass
         category = self.guardrails.classify_output(reply, moderation)
         if category == "crisis":
-            return self.crisis.respond(language, user_message, session_id)
+            return self.crisis.respond(
+                language, user_message, session_id,
+                safety_level=(risk_assessment.safety_level if risk_assessment else None),
+                assessment=risk_assessment)
         if category == "harmful":
             return self.refusal.respond("harmful", language)
 
-        # 2) Optional LLM editor pass for softer issues (medication/off-topic/etc.).
-        if not self.settings.enable_output_safety_check or self.client is None:
-            return reply
+        semantic_category = self._semantic_output_category(
+            session_id, user_message, reply)
+        if semantic_category == "self_harm_encouragement":
+            return self.crisis.respond(
+                language, user_message, session_id,
+                safety_level=(risk_assessment.safety_level if risk_assessment else None),
+                assessment=risk_assessment)
+        if semantic_category == "danger_minimization":
+            level = (risk_assessment.safety_level if risk_assessment
+                     else SafetyLevel.PHYSICAL_DANGER)
+            return self.crisis.respond(
+                language, user_message, session_id,
+                safety_level=level, assessment=risk_assessment)
+        if semantic_category in {"harm_encouragement", "medical_instruction"}:
+            return self.refusal.respond("harmful", language)
+        if semantic_category == "prompt_leak":
+            return self.scrub_leak("My system prompt and internal rules", language)
+        return reply
+
+    def _semantic_output_category(self, session_id: str, user_message: str,
+                                  reply: str) -> str:
+        if not self.settings.enable_semantic_safety or self.client is None:
+            return "safe"
+        assess = getattr(self.client, "assess_output", None)
+        if not callable(assess):
+            return "safe"
         try:
-            edited = self.client.generate(
-                instructions=OUTPUT_REVIEW_SYSTEM_PROMPT,
-                input_text=build_output_review_input(user_message, reply),
-                session_id=f"{session_id}:review",
-                temperature=0.0,
-                max_output_tokens=self.settings.max_output_tokens,
-            )
-            return edited or reply
+            value = assess(user_message=user_message, reply=reply,
+                           session_id=session_id)
+            if isinstance(value, dict):
+                return str(value.get("category", "safe"))
+            match = re.search(r"\{.*\}", str(value or ""), re.S)
+            if match:
+                return str(json.loads(match.group(0)).get("category", "safe"))
         except Exception:
-            return reply
+            pass
+        return "safe"

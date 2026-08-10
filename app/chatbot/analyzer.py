@@ -1,10 +1,9 @@
-"""Fast, deterministic message analysis -> internal ResponseStrategy.
+"""Fast response-strategy router.
 
-This is the "fast router" stage. It uses cheap regex/heuristics (NO LLM calls)
-to decide language, intent, emotion, safety level, injection/off-topic flags,
-repeated-behaviour, tone knobs, and whether RAG / memory are required.
-
-The resulting ResponseStrategy is INTERNAL ONLY and never shown to the user.
+This stage merges the upstream structured conversation-risk assessment with
+cheap deterministic rules for language, intent, restricted content, tone, and
+RAG/memory needs. It never calls an LLM itself. The resulting ResponseStrategy
+is internal only and never shown to the user.
 """
 
 from __future__ import annotations
@@ -22,10 +21,19 @@ from app.types import (
     ModerationSignal,
     ResponseFamily,
     ResponseStrategy,
+    RiskAssessment,
+    RiskDisposition,
     SafetyLevel,
     Turn,
 )
 from app.utils import detect_language
+
+_SAFETY_RANK = {
+    SafetyLevel.SAFE: 0, SafetyLevel.EMOTIONAL_DISTRESS: 1,
+    SafetyLevel.SELF_HARM_CONCERN: 2, SafetyLevel.PHYSICAL_DANGER: 3,
+    SafetyLevel.ABUSE_OR_DANGER: 3, SafetyLevel.HARM_TO_OTHERS: 4,
+    SafetyLevel.IMMINENT_SELF_HARM: 5,
+}
 
 # --- emotion cues ---
 _SAD = re.compile(r"\b(sad|down|low|depressed|lonely|alone|empty|hurt|crying|udaas|akela|dukhi)\b", re.I)
@@ -108,16 +116,33 @@ class Analyzer:
     def analyze(self, message: str, moderation: ModerationSignal, *,
                 repeated_behaviour: bool = False,
                 repetition_count: int = 0,
-                history: Optional[List[Turn]] = None) -> ResponseStrategy:
+                history: Optional[List[Turn]] = None,
+                risk_assessment: Optional[RiskAssessment] = None) -> ResponseStrategy:
         lowered = message.lower()
         language = detect_language(message)
-        safety_level = self.guardrails.assess_safety_level(message, moderation)
+        deterministic_level = self.guardrails.assess_safety_level(message, moderation)
+        safety_level = deterministic_level
+        if (risk_assessment is not None
+                and _SAFETY_RANK[risk_assessment.safety_level] > _SAFETY_RANK[safety_level]):
+            safety_level = risk_assessment.safety_level
         emotion = _detect_emotion(lowered)
+        if (risk_assessment is not None
+                and risk_assessment.emotional_state not in {"neutral", "unclear"}):
+            emotion = risk_assessment.emotional_state
         history = history or []
 
-        injection = self.guardrails.is_injection(message)
-        harmful = self.guardrails.is_harmful(message, moderation)
-        sexual = self.guardrails.is_sexual_procedural(message)
+        injection = self.guardrails.is_injection(message) or bool(
+            risk_assessment and (
+                risk_assessment.prompt_injection
+                or risk_assessment.semantic_intent == "safety_bypass"))
+        harmful = self.guardrails.is_harmful(message, moderation) or bool(
+            risk_assessment and (
+                risk_assessment.disposition == RiskDisposition.REFUSE_HARMFUL
+                or risk_assessment.semantic_intent == "harmful_instruction"))
+        sexual = self.guardrails.is_sexual_procedural(message) or bool(
+            risk_assessment and (
+                risk_assessment.disposition == RiskDisposition.REFUSE_SEXUAL
+                or risk_assessment.semantic_intent == "sexual_instruction"))
         off_topic = self.guardrails.is_off_topic(message)
         medical = self.guardrails.is_medical_request(message)
         repeat_frustration = self.guardrails.is_repeat_frustration(message)
@@ -129,11 +154,14 @@ class Analyzer:
         if sexual and not self.guardrails.should_refuse("sexual", message, moderation):
             sexual, needs_clarify = False, True
 
-        # --- intent (priority order) ---
-        if safety_level.is_crisis:
-            intent = Intent.HARMFUL if safety_level == SafetyLevel.HARM_TO_OTHERS else Intent.EMOTIONAL_SUPPORT
-        elif injection:
+        # --- ISS-16 FIX: Check injection BEFORE crisis override ---
+        # Jailbreak detection runs regardless of distress level. A message can be
+        # both emotionally distressed AND a jailbreak attempt — injection wins.
+        if injection:
             intent = Intent.INJECTION
+        # --- intent (priority order) ---
+        elif safety_level.is_crisis:
+            intent = Intent.HARMFUL if safety_level == SafetyLevel.HARM_TO_OTHERS else Intent.EMOTIONAL_SUPPORT
         elif harmful:
             intent = Intent.HARMFUL
         elif sexual:
@@ -162,7 +190,22 @@ class Analyzer:
             elif safety_level == SafetyLevel.EMOTIONAL_DISTRESS or emotion in {"sad", "anxious", "vulnerable", "angry"}:
                 intent = Intent.EMOTIONAL_SUPPORT
             else:
-                intent = Intent.SMALL_TALK
+                # --- ISS-02/03 FIX: Contextual carry-forward ---
+                # Before defaulting to SMALL_TALK, check conversational momentum.
+                intent = self._contextual_intent_resolution(
+                    message, history, risk_assessment, emotion)
+
+        # --- ISS-07 FIX: Semantic classifier override for borderline cases ---
+        # If deterministic layer says SMALL_TALK but semantic classifier detected
+        # emotional_support or implicit_self_harm, upgrade the intent.
+        if (intent == Intent.SMALL_TALK and risk_assessment is not None):
+            semantic = risk_assessment.semantic_intent
+            if semantic in ("emotional_support", "implicit_self_harm"):
+                intent = Intent.EMOTIONAL_SUPPORT
+            elif risk_assessment.emotional_distress_score >= 0.4:
+                # Even below the 0.45 threshold for safety_level, a notable
+                # distress score means this isn't casual small talk.
+                intent = Intent.EMOTIONAL_SUPPORT
 
         # An informational question isn't the user reporting their own distress.
         # Crisis levels are never downgraded — only EMOTIONAL_DISTRESS.
@@ -230,7 +273,46 @@ class Analyzer:
             emotional_pattern=emotional_pattern,
             previous_advice=previous_advice,
             avoid_techniques=avoid,
+            risk_assessment=risk_assessment,
         )
+
+    # ------------------------------------------------------------------
+    # ISS-02/03 FIX: Contextual intent resolution
+    # Prevents "intent flicker" — short follow-ups after emotional disclosures
+    # should maintain emotional_support intent, not drop to small_talk.
+    # ------------------------------------------------------------------
+    _AFFIRMATIVE = re.compile(
+        r"^\s*(yes|yeah|yep|ya|yea|haan|ha|ok|okay|sure|right|i know|help me"
+        r"|please|tell me|go on|continue|mhm|hmm|i guess|maybe|idk)\s*[.!?]*\s*$", re.I)
+
+    def _contextual_intent_resolution(self, message: str, history: List[Turn],
+                                       risk_assessment: Optional[RiskAssessment],
+                                       emotion: str) -> Intent:
+        """Determine intent for ambiguous messages using conversational context."""
+        # Short or affirmative message in an emotional conversation => carry forward
+        is_short = len(message.split()) < 15
+        is_affirmative = bool(self._AFFIRMATIVE.match(message))
+
+        if is_short or is_affirmative:
+            # Check: were recent user turns emotional?
+            recent_user = [t for t in history if t.role == "user"][-5:]
+            emotional_recent = sum(
+                1 for t in recent_user
+                if any(k in t.content.lower() for k in (
+                    "stress", "anxious", "anxiety", "sad", "lonely", "overwhelm",
+                    "depressed", "hurt", "scared", "worried", "hopeless", "crying",
+                    "breakup", "died", "grief", "worthless", "numb", "empty",
+                    "thak", "akela", "udaas", "pareshan"))
+            )
+            if emotional_recent >= 1:
+                return Intent.EMOTIONAL_SUPPORT
+
+        # Check trajectory from semantic reasoner
+        if (risk_assessment is not None
+                and risk_assessment.emotional_trajectory in ("worsening", "rapidly_worsening")):
+            return Intent.EMOTIONAL_SUPPORT
+
+        return Intent.SMALL_TALK
 
     # ------------------------------------------------------------------
     # Anti-repetition ladder (from core/.txt): if the last reply used X,
