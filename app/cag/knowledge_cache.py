@@ -41,6 +41,31 @@ def _tokens(text: str) -> List[str]:
             if len(t) > 1 and t not in _STOPWORDS]
 
 
+# ISS-15 FIX: Domain-specific synonym map for bridging vocabulary gaps in knowledge retrieval.
+_KNOWLEDGE_SYNONYMS: Dict[str, List[str]] = {
+    "counselor": ["mentor", "therapist", "guide", "counseling", "mentorship"],
+    "counseling": ["mentorship", "therapy", "guidance", "counselor"],
+    "mentor": ["counselor", "guide", "coach", "mentorship"],
+    "mentorship": ["counseling", "coaching", "guidance", "mentor"],
+    "therapy": ["counseling", "treatment", "therapist"],
+    "therapist": ["counselor", "mentor", "therapy"],
+    "pricing": ["cost", "price", "plan", "subscription", "fee"],
+    "cost": ["pricing", "price", "fee", "subscription"],
+    "subscription": ["plan", "pricing", "membership", "tier"],
+    "plan": ["subscription", "pricing", "tier", "membership"],
+    "exercise": ["technique", "practice", "activity", "routine"],
+    "technique": ["exercise", "method", "practice", "strategy"],
+    "breathing": ["breath", "inhale", "exhale", "pranayama"],
+    "meditation": ["mindfulness", "calm", "relaxation"],
+    "mindfulness": ["meditation", "awareness", "calm"],
+    "anxiety": ["anxious", "worry", "nervous", "panic", "stress"],
+    "stress": ["anxiety", "pressure", "overwhelm", "tension"],
+    "depression": ["depressed", "sadness", "low", "mood"],
+    "sleep": ["insomnia", "rest", "bedtime"],
+    "insomnia": ["sleep", "sleepless", "awake"],
+}
+
+
 def approx_tokens(text: str) -> int:
     """Cheap token estimate (~4 chars/token) - avoids a tokenizer dependency."""
     return max(1, len(text or "") // 4)
@@ -308,16 +333,26 @@ class KnowledgeCache:
         q = _tokens(query)
         if not q or not self._sections:
             return []
+
+        # ISS-15 FIX: Expand query tokens with domain-specific synonyms so
+        # "counseling" can match "mentorship", etc.
+        expanded_q = set(q)
+        for tok in q:
+            if tok in _KNOWLEDGE_SYNONYMS:
+                expanded_q.update(_KNOWLEDGE_SYNONYMS[tok])
+
         with self._lock:
             n_docs = max(1, len(self._sections))
             scores: Dict[int, float] = {}
-            for tok in set(q):
+            for tok in expanded_q:
                 postings = self._index.get(tok)
                 if not postings:
                     continue
                 idf = math.log(1 + n_docs / len(postings))
+                # Direct query tokens get full IDF; synonym expansions get 0.6x
+                weight = 1.0 if tok in set(q) else 0.6
                 for sid in postings:
-                    scores[sid] = scores.get(sid, 0.0) + idf
+                    scores[sid] = scores.get(sid, 0.0) + idf * weight
             if not scores:
                 return []
             # Heading matches get a boost.
@@ -327,7 +362,7 @@ class KnowledgeCache:
                 if knowledge_type and sec.knowledge_type != knowledge_type:
                     continue
                 head_tokens = set(_tokens(sec.heading))
-                boost = 1.0 + 0.5 * len(head_tokens & set(q))
+                boost = 1.0 + 0.5 * len(head_tokens & expanded_q)
                 results.append((score * boost, sec))
             results.sort(key=lambda x: x[0], reverse=True)
             return [sec for _, sec in results[:limit]]

@@ -18,6 +18,30 @@ class FakeLLMClient:
     def moderate(self, text: str) -> ModerationSignal:
         return ModerationSignal(flagged=False, categories={})
 
+    def assess_risk(self, *, instructions: str, input_text: str, session_id: str):
+        # Structured pre-response assessment. Deliberately not added to `calls`,
+        # which tracks user-visible generation calls in performance tests.
+        return {
+            "semantic_intent": "ordinary_conversation",
+            "emotional_state": "neutral",
+            "emotional_trajectory": "stable",
+            "self_harm_score": 0.0,
+            "physical_danger_score": 0.0,
+            "harm_to_others_score": 0.0,
+            "emotional_distress_score": 0.0,
+            "overall_score": 0.0,
+            "hazards": [], "compound_factors": [], "evidence": [],
+            "immediate_actions": [], "recommended_action": "normal",
+            "intoxication_or_impairment": False, "access_to_means": False,
+            "timing_immediate": False, "isolation": False,
+            "farewell_or_finality": False, "hopelessness": False,
+            "unsafe_framing": False, "prompt_injection": False,
+            "danger_resolved": False, "uncertainty": 0.0,
+        }
+
+    def assess_output(self, *, user_message: str, reply: str, session_id: str):
+        return {"category": "safe"}
+
     def generate(self, *, instructions: str, input_text: str, session_id: str,
                  temperature=None, max_output_tokens=None) -> str:
         self.calls.append({"instructions": instructions, "input": input_text,
