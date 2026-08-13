@@ -19,6 +19,11 @@ from app.types import KnowledgeType, SafetyDecision
 
 # --- Soulene product signals ---
 _SOULENE_NAME = re.compile(r"\bsoulene\b", re.I)
+# Definitional / explanatory question about the product itself. Only meaningful
+# when the message also names Soulene (checked by the caller).
+_SOULENE_DEFINITIONAL = re.compile(
+    r"\b(what\s+is|what'?s|what\s+are|who\s+is|tell me about|about|explain"
+    r"|how\s+does|how\s+do|how\s+can|what\s+can|what\s+does)\b", re.I)
 # ISS-08 FIX: Narrowed product keywords — removed overly broad terms like
 # "plan", "school", "college", "sport" that frequently appear in emotional
 # conversations. These only trigger Soulene routing when "soulene" is present.
@@ -32,6 +37,15 @@ _SOULENE_BUSINESS_STRICT = re.compile(
 _SOULENE_BUSINESS_BROAD = re.compile(
     r"\b(plan|plans|service|services|school|schools|university|universities"
     r"|college|workplace|workplaces|athlete|athletes|sports|sport)\b",
+    re.I,
+)
+# Second-person questions about the bot's OWN offerings ("what are your plans",
+# "do you have pricing", "what are your features"). These are product questions,
+# unambiguously distinct from first-person emotional statements like "I have no
+# plan for my life" (which the emotional guard below excludes).
+_SOULENE_SECOND_PERSON = re.compile(
+    r"\byour\s+(plan|plans|pricing|price|prices|features?|services?|offering|offerings"
+    r"|subscription|tiers?|membership|cost|costs|packages?)\b",
     re.I,
 )
 
@@ -77,7 +91,17 @@ def classify_knowledge(message: str, decision: SafetyDecision) -> KnowledgeType:
         if _SOULENE_NAME.search(lowered):
             if _SOULENE_BUSINESS_STRICT.search(lowered) or _SOULENE_BUSINESS_BROAD.search(lowered):
                 return KnowledgeType.SOULENE
+            # A definitional question naming the product ("what is Soulene",
+            # "tell me about Soulene", "how does Soulene work") is a product
+            # question even without a business keyword, and should be answered
+            # from knowledge rather than falling through to small talk.
+            if _SOULENE_DEFINITIONAL.search(lowered):
+                return KnowledgeType.SOULENE
         elif _SOULENE_BUSINESS_STRICT.search(lowered):
+            return KnowledgeType.SOULENE
+        elif _SOULENE_SECOND_PERSON.search(lowered):
+            # "what are your plans / pricing / features" — asking the bot about
+            # its own offerings is a product question, not small talk.
             return KnowledgeType.SOULENE
 
     # Informational mental-health questions or exercise requests -> mental-health RAG.

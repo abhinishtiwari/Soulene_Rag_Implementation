@@ -50,8 +50,13 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(r.status_code, 200)
         body = r.get_json()
         self.assertTrue(body["reply"])
-        self.assertIn("intent", body)
+        self.assertIn("route", body)
         self.assertIn("latency_ms", body)
+        # ISS-17: internal classification (intent, safety_level) must NOT be
+        # exposed on the public endpoint — it would let an attacker probe how
+        # their messages are classified and tune evasion.
+        self.assertNotIn("intent", body)
+        self.assertNotIn("safety_level", body)
 
     def test_chat_rejects_empty(self):
         self.assertEqual(self.client.post("/chat", json={"message": "  "}).status_code, 400)

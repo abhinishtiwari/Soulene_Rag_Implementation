@@ -52,13 +52,25 @@ class Guardrails:
     # --- programming ---
     _code_block = re.compile(r"```|Traceback \(most recent call last\)", re.M)
     _programming_terms = re.compile(
-        r"\b(coding|code|debug(?:ging)?|traceback|stack trace|python|java(script)?|c\+\+|c#"
-        r"|sql|html|css|react|node(?:\.?js)?|algorithm|compile|runtime|syntax error)\b",
+        r"\b(coding|code|codes|debug(?:ging)?|traceback|stack trace|python|java(script)?|c\+\+|c#"
+        r"|sql|html|css|react|node(?:\.?js)?|algorithm|compile|runtime|syntax error"
+        r"|script|snippet|program|programming|regex|api call|function call)\b",
         re.I,
     )
+    # Request-shaped phrasing, kept deliberately generic so a boundary cannot be
+    # bypassed by rewording. Previously only "write a" matched, so "write it for
+    # me" / "you need to write it" slipped past and the refusal was abandoned.
     _programming_intent = re.compile(
         r"\b(how to|how do i|write a|fix this|debug|create a function|build an app"
-        r"|not working|compile|run this code|explain this code)\b",
+        r"|not working|compile|run this code|explain this code"
+        # generic task requests
+        r"|write (?:it|this|that|me|one|some)\b|(?:you|u) (?:need to|have to|should|must) write"
+        r"|give me (?:the|a|some|that)?\s*(?:code|script|program|snippet|solution)"
+        r"|send me (?:the|a)?\s*(?:code|script|program)"
+        r"|(?:can|could|would|will) (?:you|u) (?:please )?(?:write|make|create|build|generate|code|do)"
+        r"|(?:just )?(?:make|create|generate|build|code) (?:it|this|that|me|one)\b"
+        r"|do it for me|write it for me|make it for me|need the code|want the code"
+        r"|help me (?:write|code|build|make))\b",
         re.I,
     )
 
@@ -211,13 +223,17 @@ class Guardrails:
     # Hindi / Hinglish injection & extraction attempts.
     _jailbreak_native = re.compile(
         r"(previous instructions? (?:bhula|bhool|ignore kar|chhod)"
-        r"|apne (?:rules?|instructions?|niyam) (?:bhula|bhool|todo|tod do|ignore)"
-        r"|system prompt (?:batao|bata do|dikhao|dikha do|share karo)"
-        r"|tumhare (?:rules?|instructions?|niyam) kya (?:hain|hai)"
-        r"|hidden (?:instructions?|rules?) (?:batao|dikhao)"
-        r"|apna prompt (?:batao|dikhao|likho)"
-        r"|developer mode (?:on|chalu|activate)"
-        r"|निर्देश (?:भूल|बताओ|दिखाओ)|सिस्टम प्रॉम्प्ट)",
+        r"|apne (?:rules?|instructions?|niyam|guidelines?) "
+        r"(?:bhula|bhool|bhul jao|bhool jao|bhula do|todo|tod do|tod do|chhod do|ignore)"
+        r"|(?:rules?|niyam) (?:bhul jao|bhool jao|tod do|chhod do)"
+        r"|sab (?:kuch )?(?:bata do|bata de|dikha do|reveal kar)"
+        r"|system prompt (?:batao|bata do|bata de|dikhao|dikha do|share karo|reveal)"
+        r"|tumhare (?:rules?|instructions?|niyam) (?:kya (?:hain|hai)|batao|dikhao)"
+        r"|hidden (?:instructions?|rules?) (?:batao|dikhao|bata do)"
+        r"|apna (?:prompt|system prompt) (?:batao|dikhao|likho|bata do)"
+        r"|developer mode (?:on|chalu|activate|kar do)"
+        r"|(?:sari|saari|apni) (?:secret|hidden|internal) .{0,20}(?:batao|dikhao|bata do)"
+        r"|निर्देश (?:भूल|बताओ|दिखाओ)|सिस्टम प्रॉम्प्ट|अपने नियम (?:भूल|तोड़))",
         re.I,
     )
 

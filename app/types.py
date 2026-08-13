@@ -96,6 +96,14 @@ class RiskAssessment:
     danger_resolved: bool = False
     uncertainty: float = 0.0
     source: str = "deterministic"
+    # True when THIS turn independently evidences crisis-level risk. False when
+    # the level is elevated only by carried background risk from earlier turns.
+    # Lets the responder use the full safety protocol for an acute moment but a
+    # warm, non-repetitive reply once the user has moved on.
+    acute_now: bool = True
+    # Who the danger concerns: "self" (the user), "other" (someone they're
+    # worried about), or "unclear". Defaults to "self" (conservative).
+    risk_subject: str = "self"
 
     def to_dict(self) -> Dict[str, object]:
         data = dict(self.__dict__)
@@ -161,6 +169,9 @@ class ResponseStrategy:
     previous_advice: bool = False      # last reply already gave advice/steps
     avoid_techniques: List[str] = field(default_factory=list)  # anti-repetition ladder
     risk_assessment: Optional["RiskAssessment"] = None
+    # True when the message depends on earlier turns to be understood at all
+    # (unbound pronoun, bare continuation, comparative with no subject).
+    referential: bool = False
 
     def __post_init__(self):
         if self.safety_level is None:

@@ -189,11 +189,11 @@ def test_context():
         svc3.handle(session3, f"Message number {i} about my anxiety at work", user_id=user3)
 
     ctx_id = svc3._context_id(user3, session3)
-    needs_sum = svc3.cag.context.needs_summary(ctx_id)
-    check("Summary needed after 25+ messages", needs_sum)
-
+    # After overflow a summary must EXIST. needs_summary() is now throttled
+    # (it only re-triggers every few new turns to avoid an LLM call per turn),
+    # so the meaningful assertion is that a summary was actually produced.
     summary = svc3.cag.context.summary(ctx_id)
-    check("Summary was generated",
+    check("Summary was generated after overflow",
           bool(summary),
           f"Summary: '{summary[:80] if summary else 'EMPTY'}'")
 

@@ -191,6 +191,9 @@ class ChatbotService:
     def _ingest_assistant_turn(self, user_id, session_id, context_id, reply) -> None:
         self._archive(user_id, session_id, "assistant", reply)
         self.cag.context.append(context_id, "assistant", reply)
+        # This session's content changed, so the cached cross-session view of
+        # this user is now out of date.
+        self.cag.context.invalidate_cross_session(f"{len(user_id)}:{user_id}")
 
     def _lookup(self, message: str, strategy: ResponseStrategy):
         # Knowledge is available for info questions even if the user is distressed
@@ -210,11 +213,36 @@ class ChatbotService:
     def _respond(self, session_id, user_id, context_id, message, strategy, lookup=None):
         """Return (route, fully validated reply, lookup)."""
         if strategy.safety_level.is_crisis:
-            reply = self.crisis.respond(
-                strategy.language, message, session_id,
-                safety_level=strategy.safety_level,
-                assessment=strategy.risk_assessment,
-            )
+            ra = strategy.risk_assessment
+            history_window = self.cag.context.formatted_window(context_id, limit=6)
+            # Concern about SOMEONE ELSE: help them help their person instead of
+            # telling them their own safety is at risk. Gated hard — a deterministic
+            # self-harm/danger floor on the current message always forces the
+            # self-directed protocol, so "I want to die" is never mis-read as
+            # third-party even if the model slips.
+            deterministic_self = self.guardrails.assess_safety_level(
+                message, ModerationSignal()).is_crisis
+            if (ra is not None and ra.risk_subject == "other"
+                    and not deterministic_self):
+                reply = self.crisis.respond_third_party(
+                    strategy.language, message, session_id, history=history_window)
+            # Graceful step-down: if the level is elevated only by carried
+            # history (this turn is not itself acute), answer naturally and stay
+            # gently attentive instead of repeating the full emergency script.
+            # This is what stops the bot getting "stuck" replaying safety steps
+            # after the person has calmed down or changed the subject.
+            elif ra is not None and not ra.acute_now:
+                reply = self.crisis.gentle_followup(
+                    strategy.language, message, session_id, history=history_window)
+            else:
+                # The current turn itself evidences crisis: full safety protocol,
+                # with a context-aware lead and deterministic safety steps.
+                reply = self.crisis.respond(
+                    strategy.language, message, session_id,
+                    safety_level=strategy.safety_level,
+                    assessment=strategy.risk_assessment,
+                    history=history_window,
+                )
             return Route.CRISIS, self._finalize_reply(
                 session_id, message, reply, strategy), None
 
@@ -259,6 +287,10 @@ class ChatbotService:
         rb, lang = self.response_builder, strategy.language
         if strategy.intent == Intent.OFF_TOPIC:
             reply = rb.enforce_domain(reply, lang)
+        # Executable code is never a valid reply, whatever the turn was
+        # classified as. Runs unconditionally so a reworded request that slips
+        # past the input classifier is still caught on the way out.
+        reply = rb.enforce_no_code(reply, lang)
         # Never describe/recommend a rival app.
         reply = rb.enforce_no_other_apps(reply, lang)
         # Never market plans/pricing at someone asking about medication or in distress.
@@ -338,6 +370,128 @@ class ChatbotService:
         summary = "Earlier they talked about: " + ", ".join(topics[:5]) + "."
         ctx.set_summary(session_id, summary)
 
+    # ------------------------------------------------------------------
+    # Cross-session context
+    #
+    # A single session is rarely the whole story. The model is given:
+    #   * the last few COMPLETE sessions, condensed (fast recall path)
+    #   * older sessions only when they are actually relevant to this message
+    # Relevance is scored lexically, consistent with the rest of the
+    # architecture (no embeddings), and nothing is included when nothing scores.
+    # ------------------------------------------------------------------
+    _RECENT_SESSIONS = 3
+    _DIGEST_SESSIONS = 30
+    # Ceiling on the cross-session block so background context can never crowd
+    # out the current turn or inflate cost without bound.
+    _CROSS_SESSION_CHAR_BUDGET = 2400
+    _STOP = {
+        "the", "and", "for", "with", "that", "this", "from", "have", "about",
+        "what", "when", "your", "you", "are", "was", "were", "im", "me", "my",
+        "to", "of", "in", "is", "it", "a", "an", "i", "feel", "feeling", "today",
+        "just", "but", "not", "can", "cant", "dont", "get", "got", "like", "know",
+        "really", "very", "much", "some", "any", "how", "why", "who", "will",
+    }
+
+    @classmethod
+    def _keywords(cls, text: str) -> set:
+        import re as _re
+        return {t for t in _re.findall(r"[a-z0-9']+", (text or "").lower())
+                if len(t) > 2 and t not in cls._STOP}
+
+    def _load_cross_session(self, user_id: str, session_id: str):
+        """Fetch (and cache) the user's other sessions. Always user-scoped."""
+        if self.archive is None:
+            return [], []
+        key = f"{len(user_id)}:{user_id}"
+        cached = self.cag.context.cross_session(key)
+        if cached is not None:
+            return cached.recent, cached.digests
+        recent, digests = [], []
+        fetch_recent = getattr(self.archive, "recent_sessions", None)
+        fetch_digests = getattr(self.archive, "session_digests", None)
+        if callable(fetch_recent):
+            try:
+                recent = fetch_recent(user_id, exclude=session_id,
+                                     limit=self._RECENT_SESSIONS) or []
+            except Exception:
+                recent = []
+        if callable(fetch_digests):
+            try:
+                digests = fetch_digests(user_id, exclude=session_id,
+                                       limit=self._DIGEST_SESSIONS) or []
+            except Exception:
+                digests = []
+        self.cag.context.set_cross_session(key, recent, digests)
+        return recent, digests
+
+    def _cross_session_context(self, user_id: str, session_id: str,
+                               message: str) -> str:
+        """Compact cross-session context block, or '' when nothing is relevant."""
+        recent, digests = self._load_cross_session(user_id, session_id)
+        if not recent and not digests:
+            return ""
+        blocks: List[str] = []
+
+        # 1) Last few complete sessions — condensed but always available.
+        for idx, sess in enumerate(recent[:self._RECENT_SESSIONS], start=1):
+            lines = []
+            for turn in sess.get("messages", []):
+                content = (turn.get("content") or "").strip()
+                if not content:
+                    continue
+                who = "They" if turn.get("role") == "user" else "You"
+                lines.append(f"{who}: {content}")
+            if not lines:
+                continue
+            # Keep the opening and the ending: how it started and where it left
+            # off. The most recent prior session is kept fuller than older ones,
+            # since continuity matters most there.
+            keep = 10 if idx == 1 else 6
+            if len(lines) > keep:
+                half = max(2, keep // 2)
+                lines = lines[:half] + ["..."] + lines[-half:]
+            blocks.append(f"Previous session {idx} (most recent first):\n"
+                          + "\n".join(lines))
+
+        # 2) Older sessions only when they overlap the current message.
+        q = self._keywords(message)
+        if q:
+            recent_ids = {s.get("session_id") for s in recent}
+            scored = []
+            for d in digests:
+                if d.get("session_id") in recent_ids:
+                    continue
+                overlap = q & self._keywords(d.get("text", ""))
+                if len(overlap) >= 2:
+                    scored.append((len(overlap), d, sorted(overlap)[:6]))
+            scored.sort(key=lambda x: x[0], reverse=True)
+            for _, d, terms in scored[:2]:
+                snippet = self._relevant_snippet(d.get("text", ""), q)
+                if snippet:
+                    blocks.append(
+                        "Related older conversation (topics: "
+                        + ", ".join(terms) + "):\n" + snippet)
+
+        # Hard ceiling so background can never crowd out the current turn.
+        out = "\n\n".join(blocks)
+        return out[:self._CROSS_SESSION_CHAR_BUDGET]
+
+    def _relevant_snippet(self, text: str, q: set, width: int = 320) -> str:
+        """Return the part of an older session that best matches the query."""
+        import re as _re
+        sentences = [s.strip() for s in _re.split(r"(?<=[.!?])\s+|\n+", text or "")
+                     if s.strip()]
+        if not sentences:
+            return ""
+        best = sorted(
+            ((len(q & self._keywords(s)), i, s) for i, s in enumerate(sentences)),
+            key=lambda x: (-x[0], x[1]))
+        picked = [s for score, _, s in best[:3] if score > 0]
+        if not picked:
+            return ""
+        out = " ".join(picked)
+        return out[:width]
+
     def _build_prompt(self, session_id, user_id, context_id, message, strategy, lookup):
         memories, contradictions = [], []
         if strategy.memory_required:
@@ -352,11 +506,27 @@ class ChatbotService:
         # The current turn has not been appended yet, so it appears exactly once
         # through `message` rather than being duplicated in recent history.
         history = self.cag.context.formatted_window(context_id)
+        try:
+            cross = self._cross_session_context(user_id, session_id, message)
+        except Exception:
+            cross = ""
+        # A reference can point at a previous SESSION, not just an earlier turn
+        # ("I'm exhausted from looking after her" as the first message of a new
+        # session). The analyzer only sees in-session history, so widen the flag
+        # when cross-session background is available.
+        referential = strategy.referential
+        if not referential and cross:
+            try:
+                referential = self.analyzer.has_unbound_reference(message)
+            except Exception:
+                pass
         input_text = build_model_input(
             message, history, lookup.knowledge_context if lookup else "",
             memories=memories, contradictions=contradictions,
             session_summary=self.cag.context.summary(context_id) or None,
             knowledge_missing=bool(lookup and strategy.rag_required and not lookup.knowledge_hit),
+            cross_session=cross,
+            referential=referential,
         )
         return instructions, input_text
 

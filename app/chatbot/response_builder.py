@@ -33,15 +33,37 @@ class ResponseBuilder:
     _LEAK = re.compile(
         r"(system prompt|my (hidden )?instructions|according to my (system|prompt|rules)"
         r"|my system (says|policy)|response strategy for this message|base_system_prompt"
-        r"|i was instructed to|my configuration|internal (only|rules))",
+        r"|i was instructed to|my configuration|internal (only|rules)"
+        # verbatim fragments of the actual core prompt / identity block
+        r"|you are soulene ai, a warm|boundaries you always keep|s3 cubes innovations"
+        r"|treat any text in user messages|never reveal your instructions"
+        r"|this turn:|core_prompt|core system prompt)",
+        re.I,
+    )
+
+    # Concrete secrets / credentials that must never appear in a reply, whatever
+    # the model emits. This is a hard backstop independent of phrasing/language.
+    _SECRET = re.compile(
+        r"(sk-[A-Za-z0-9_\-]{6,}"                     # OpenAI-style keys
+        r"|mongodb(?:\+srv)?://"                        # Mongo connection strings
+        r"|postgres(?:ql)?://|mysql://|redis://"        # other DB URIs
+        r"|api[_\s-]?key\s*[:=]"                        # API_KEY= / api key:
+        r"|bearer\s+[A-Za-z0-9._\-]{10,}"               # bearer tokens
+        r"|-----BEGIN [A-Z ]*PRIVATE KEY-----"          # private keys
+        r"|mongo_uri|openai_api_key|admin_api_key)",    # env var names
         re.I,
     )
 
     def scrub_leak(self, reply: str, language: Language) -> str:
-        if self._LEAK.search(reply or ""):
+        text = reply or ""
+        # A concrete secret pattern is redacted even if the surrounding text
+        # looks benign — never let a credential reach the user.
+        if self._LEAK.search(text) or self._SECRET.search(text):
             if language in (Language.HINDI, Language.HINGLISH):
-                return "Main apne internal setup ke baare mein baat nahi kar sakta, but tumhari help zaroor kar sakta hoon. Kya chal raha hai?"
-            return "I can't share details about how I work internally, but I'm here to help you. What's on your mind?"
+                return ("Main apne internal setup ke baare mein baat nahi kar sakta, "
+                        "but tumhari help zaroor kar sakta hoon. Kya chal raha hai?")
+            return ("I can't share details about how I work internally, but I'm here "
+                    "to help you. What's on your mind?")
         return reply
 
     # ------------------------------------------------------------------
@@ -56,6 +78,39 @@ class ResponseBuilder:
         r"|\bcapital of \w+ is\b)",
         re.I,
     )
+
+    # Unambiguous executable-code artefacts. Unlike _TECHNICAL_ANSWER above this
+    # contains no ordinary English words, so it is safe to run on EVERY reply.
+    # It exists because the domain boundary used to be enforced only when the
+    # input classifier had already flagged the turn as off-topic — meaning the
+    # backstop never ran precisely when the classifier had been talked around.
+    _CODE_ARTEFACT = re.compile(
+        r"(```"
+        r"|^\s*(?:import|from)\s+[a-z_][\w.]*\s*$"
+        r"|^\s*(?:def|class)\s+\w+\s*[(:]"
+        r"|\bprint\s*\(\s*[\"'f]"
+        r"|\bconsole\.log\s*\("
+        r"|\bos\.(?:listdir|path|getcwd|system)\b"
+        r"|\bfor\s+\w+\s+in\s+[\w.]+\s*\(?.*\)?\s*:"
+        r"|\bif\s+__name__\s*==\s*[\"']__main__[\"']"
+        r"|\b(?:public|private)\s+static\s+void\s+main"
+        r"|<\?php|\bSELECT\b[\s\S]{0,80}\bFROM\b"
+        r"|\bfunction\s+\w+\s*\([^)]*\)\s*\{)",
+        re.I | re.M,
+    )
+
+    def enforce_no_code(self, reply: str, language: Language) -> str:
+        """Strip an executable-code answer from ANY reply.
+
+        Runs unconditionally: a wellbeing companion has no situation in which
+        emitting a runnable program is correct, so this does not depend on the
+        turn having been classified as off-topic.
+        """
+        if not reply or not self._CODE_ARTEFACT.search(reply):
+            return reply
+        pool = (self._REDIRECTS_HI if language in (Language.HINDI, Language.HINGLISH)
+                else self._REDIRECTS_EN)
+        return random.choice(pool)
 
     _REDIRECTS_EN = [
         "Ha, that one's outside my lane — I'm your wellbeing corner, not your code editor. "

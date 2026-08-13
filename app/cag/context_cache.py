@@ -11,6 +11,7 @@ plus an optional rolling summary of what fell out of that window.
 from __future__ import annotations
 
 import threading
+import time
 from collections import deque
 from dataclasses import dataclass, field
 from typing import Deque, Dict, List, Optional
@@ -25,13 +26,35 @@ class ConversationState:
     counters: Dict[str, int] = field(default_factory=dict)
     safety_state: Dict[str, object] = field(default_factory=dict)
     dropped: int = 0
+    # Total turns appended when the rolling summary was last (re)generated.
+    # Used to regenerate only after enough NEW turns have overflowed, instead
+    # of on every turn (which cost one LLM call per turn in long chats).
+    summarized_at: int = 0
+    appended_total: int = 0
+
+
+@dataclass
+class CrossSessionState:
+    """Cached view of a user's OTHER sessions.
+
+    The last few complete sessions are kept verbatim for fast recall; older
+    sessions are kept as digests only, so relevance can be scored without
+    loading long transcripts on the hot path. MongoDB stays the source of truth.
+    """
+
+    recent: List[dict] = field(default_factory=list)   # newest-first, with messages
+    digests: List[dict] = field(default_factory=list)  # {session_id, text}
+    fetched_at: float = 0.0
 
 
 class ContextCache:
-    def __init__(self, cache_size: int = 100, prompt_window: int = 20):
+    def __init__(self, cache_size: int = 100, prompt_window: int = 20,
+                 cross_session_ttl: float = 300.0):
         self.cache_size = max(10, cache_size)
         self.prompt_window = max(4, prompt_window)
+        self.cross_session_ttl = cross_session_ttl
         self._conversations: Dict[str, ConversationState] = {}
+        self._cross: Dict[str, CrossSessionState] = {}
         self._lock = threading.RLock()
 
     # ------------------------------------------------------------------
@@ -50,6 +73,7 @@ class ContextCache:
             if len(st.turns) == st.turns.maxlen:
                 st.dropped += 1
             st.turns.append(Turn(role=role, content=content))
+            st.appended_total += 1
 
     def prime(self, conversation_id: str, turns: List[Turn]) -> None:
         """Warm the cache from the archive (e.g. after a restart)."""
@@ -90,7 +114,11 @@ class ContextCache:
 
     def set_summary(self, conversation_id: str, summary: str) -> None:
         with self._lock:
-            self._state(conversation_id).summary = (summary or "").strip()
+            st = self._state(conversation_id)
+            st.summary = (summary or "").strip()
+            # Mark the point at which the summary reflects the transcript, so it
+            # is not regenerated again until enough new turns have overflowed.
+            st.summarized_at = st.appended_total
 
     def safety_state(self, conversation_id: str) -> Dict[str, object]:
         with self._lock:
@@ -100,11 +128,23 @@ class ContextCache:
         with self._lock:
             self._state(conversation_id).safety_state = dict(state or {})
 
+    # Regenerate the rolling summary only after this many NEW turns have been
+    # appended since the last summary. Keeps a long conversation from spending
+    # one LLM call per turn while still refreshing often enough for continuity.
+    _SUMMARY_REFRESH_STEP = 8
+
     def needs_summary(self, conversation_id: str) -> bool:
-        """True when messages have scrolled past the prompt window."""
+        """True when the window has overflowed AND enough new turns have arrived
+        since the summary was last generated to justify regenerating it."""
         with self._lock:
             st = self._state(conversation_id)
-            return len(st.turns) > self.prompt_window or st.dropped > 0
+            overflowed = len(st.turns) > self.prompt_window or st.dropped > 0
+            if not overflowed:
+                return False
+            # Always allow the first summary; afterwards throttle by step.
+            if not st.summary:
+                return True
+            return (st.appended_total - st.summarized_at) >= self._SUMMARY_REFRESH_STEP
 
     def overflow_turns(self, conversation_id: str) -> List[Turn]:
         """Cached turns that sit outside the prompt window."""
@@ -141,6 +181,30 @@ class ContextCache:
             if not st.counters:  # Only restore if not already populated
                 st.counters = {k: int(v) for k, v in counters.items()
                                if isinstance(v, (int, float))}
+
+    # ------------------------------------------------------------------
+    # Cross-session cache (per user, TTL-bounded)
+    # ------------------------------------------------------------------
+    def cross_session(self, user_key: str) -> Optional[CrossSessionState]:
+        """Return the cached cross-session view, or None when stale/absent."""
+        with self._lock:
+            st = self._cross.get(user_key)
+        if st is None:
+            return None
+        if (time.time() - st.fetched_at) > self.cross_session_ttl:
+            return None
+        return st
+
+    def set_cross_session(self, user_key: str, recent: List[dict],
+                          digests: List[dict]) -> None:
+        with self._lock:
+            self._cross[user_key] = CrossSessionState(
+                recent=list(recent or []), digests=list(digests or []),
+                fetched_at=time.time())
+
+    def invalidate_cross_session(self, user_key: str) -> None:
+        with self._lock:
+            self._cross.pop(user_key, None)
 
     def clear(self, conversation_id: str) -> None:
         with self._lock:

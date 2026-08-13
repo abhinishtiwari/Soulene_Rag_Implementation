@@ -159,6 +159,76 @@ class ChatArchiveMongo:
             return []
 
     # ------------------------------------------------------------------
+    # Cross-session history (every query filtered by user_id)
+    # ------------------------------------------------------------------
+    def recent_sessions(self, user_id: str, *, exclude: Optional[str] = None,
+                        limit: int = 3, per_session: int = 40) -> List[dict]:
+        """Most recently updated other sessions, newest first, with messages."""
+        out: List[dict] = []
+        try:
+            cursor = (self._sessions.find({"user_id": user_id},
+                                          projection={"_id": 0, "session_id": 1,
+                                                      "updated_at": 1})
+                      .sort("updated_at", -1).limit(limit + 5))
+            for s in cursor:
+                sid = s.get("session_id")
+                if not sid or sid == exclude:
+                    continue
+                msgs = list(
+                    self._messages.find(
+                        {"user_id": user_id, "conversation_id": sid},
+                        projection={"_id": 0, "role": 1, "content": 1,
+                                    "sequence_number": 1})
+                    .sort("sequence_number", -1).limit(per_session)
+                )
+                if not msgs:
+                    continue
+                msgs.reverse()
+                out.append({
+                    "session_id": sid,
+                    "updated_at": s.get("updated_at", 0),
+                    "messages": [{"role": m.get("role", ""),
+                                  "content": m.get("content", "")} for m in msgs],
+                })
+                if len(out) >= limit:
+                    break
+        except Exception:
+            return []
+        return out
+
+    def session_digests(self, user_id: str, *, exclude: Optional[str] = None,
+                        limit: int = 30, skip: int = 0) -> List[dict]:
+        """Lightweight per-session user-text digests for relevance selection."""
+        out: List[dict] = []
+        try:
+            cursor = (self._sessions.find({"user_id": user_id},
+                                          projection={"_id": 0, "session_id": 1,
+                                                      "updated_at": 1})
+                      .sort("updated_at", -1).skip(skip).limit(limit))
+            for s in cursor:
+                sid = s.get("session_id")
+                if not sid or sid == exclude:
+                    continue
+                msgs = list(
+                    self._messages.find(
+                        {"user_id": user_id, "conversation_id": sid,
+                         "role": "user"},
+                        projection={"_id": 0, "content": 1,
+                                    "sequence_number": 1})
+                    .sort("sequence_number", 1).limit(80)
+                )
+                if not msgs:
+                    continue
+                out.append({
+                    "session_id": sid,
+                    "updated_at": s.get("updated_at", 0),
+                    "text": " ".join(m.get("content", "") for m in msgs)[:4000],
+                })
+        except Exception:
+            return []
+        return out
+
+    # ------------------------------------------------------------------
     # Sessions (same API as ChatArchiveJSON)
     # ------------------------------------------------------------------
     def list_sessions(self, user_id: str) -> List[dict]:

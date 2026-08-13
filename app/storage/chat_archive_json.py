@@ -180,6 +180,58 @@ class ChatArchiveJSON:
         return all_msgs
 
     # ------------------------------------------------------------------
+    # Cross-session history (always scoped to one user)
+    # ------------------------------------------------------------------
+    def recent_sessions(self, user_id: str, *, exclude: Optional[str] = None,
+                        limit: int = 3, per_session: int = 40) -> List[dict]:
+        """Most recently updated other sessions, newest first, with messages."""
+        out: List[dict] = []
+        for meta in self.list_sessions(user_id):
+            sid = meta.get("session_id", "")
+            if not sid or sid == exclude:
+                continue
+            with self._lock:
+                data = self._load_session(user_id, sid)
+            msgs = data.get("messages", [])
+            if not msgs:
+                continue
+            out.append({
+                "session_id": sid,
+                "updated_at": meta.get("updated_at", 0),
+                "messages": [
+                    {"role": m.get("role", ""), "content": m.get("content", "")}
+                    for m in msgs[-per_session:]
+                ],
+            })
+            if len(out) >= limit:
+                break
+        return out
+
+    def session_digests(self, user_id: str, *, exclude: Optional[str] = None,
+                        limit: int = 30, skip: int = 0) -> List[dict]:
+        """Lightweight digests of older sessions for relevance selection.
+
+        Returns only what is needed to score relevance, never whole transcripts,
+        so scanning a long history stays cheap.
+        """
+        out: List[dict] = []
+        metas = [m for m in self.list_sessions(user_id)
+                 if m.get("session_id") and m.get("session_id") != exclude]
+        for meta in metas[skip:skip + limit]:
+            sid = meta["session_id"]
+            with self._lock:
+                data = self._load_session(user_id, sid)
+            msgs = [m for m in data.get("messages", []) if m.get("role") == "user"]
+            if not msgs:
+                continue
+            out.append({
+                "session_id": sid,
+                "updated_at": meta.get("updated_at", 0),
+                "text": " ".join(m.get("content", "") for m in msgs)[:4000],
+            })
+        return out
+
+    # ------------------------------------------------------------------
     # Session listing (for the multi-session UI)
     # ------------------------------------------------------------------
     def list_sessions(self, user_id: str) -> List[dict]:

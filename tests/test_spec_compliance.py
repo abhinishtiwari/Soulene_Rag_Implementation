@@ -162,8 +162,13 @@ class LongConversationContinuityTests(unittest.TestCase):
         for i in range(40):
             self.svc.handle(self.sid, f"just chatting about nothing {i}", user_id=self.sid)
         self.svc._refresh_summary(self.sid)
-        summary = self.svc.cag.context.summary(self.sid)
-        self.assertIn("work stress", summary)
+        summary = self.svc.cag.context.summary(self.sid).lower()
+        # The rolling summary must retain the early subject matter so continuity
+        # survives once those turns scroll out of the window. (Implementation is
+        # an LLM narrative summary; assert on captured content, not a fixed label.)
+        self.assertTrue(summary, "a summary should be generated after overflow")
+        self.assertTrue(any(w in summary for w in ("work", "boss", "deadline")),
+                        f"summary should retain the early work topic, got: {summary!r}")
 
     def test_summary_reaches_the_prompt(self):
         self.svc.handle(self.sid, "I can't sleep at night, insomnia is awful", user_id=self.sid)

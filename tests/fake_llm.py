@@ -46,6 +46,11 @@ class FakeLLMClient:
                  temperature=None, max_output_tokens=None) -> str:
         self.calls.append({"instructions": instructions, "input": input_text,
                            "session": session_id})
+        # Rolling-summary pass: the real model returns a narrative summary of the
+        # overflow. Model that here by echoing the overflowed user text so tests
+        # can assert the summary both exists and captures earlier topics.
+        if session_id.endswith("_summary") or "summarize what this person" in instructions.lower():
+            return "Earlier they talked about: " + input_text.replace("\n", " ")[:400]
         # Output-review pass: return the draft (last section) unchanged.
         if session_id.endswith(":review"):
             marker = "Draft reply:\n"

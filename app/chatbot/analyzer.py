@@ -274,6 +274,7 @@ class Analyzer:
             previous_advice=previous_advice,
             avoid_techniques=avoid,
             risk_assessment=risk_assessment,
+            referential=self._is_referential(message, history),
         )
 
     # ------------------------------------------------------------------
@@ -284,6 +285,65 @@ class Analyzer:
     _AFFIRMATIVE = re.compile(
         r"^\s*(yes|yeah|yep|ya|yea|haan|ha|ok|okay|sure|right|i know|help me"
         r"|please|tell me|go on|continue|mhm|hmm|i guess|maybe|idk)\s*[.!?]*\s*$", re.I)
+
+    # ------------------------------------------------------------------
+    # Referential detection.
+    #
+    # "It became worse", "she said no", "that made it harder" cannot be
+    # understood from the sentence alone. Marking these lets the prompt tell the
+    # model to resolve the reference against earlier turns instead of treating
+    # the message as a brand-new topic — which is what produced replies that
+    # behaved as though the conversation had just started.
+    # ------------------------------------------------------------------
+    _PRONOUN = re.compile(
+        r"\b(it|its|it'?s|that|this|those|these|they|them|their|he|him|his|she|her|hers"
+        r"|woh|uska|uski|unka|yeh|iska)\b", re.I)
+    # An antecedent supplied inside the same message makes it self-contained.
+    _ANTECEDENT = re.compile(
+        r"\b(my|our|the|a|an|about|regarding|with)\s+\w{3,}"
+        r"|\b(work|job|boss|manager|exam|college|school|mother|mom|father|dad|sister"
+        r"|brother|wife|husband|partner|friend|project|deadline|interview|health"
+        r"|sleep|money|family|relationship)\b", re.I)
+    _CONTINUATION = re.compile(
+        r"\b(became|got|getting|gets|turned|feels?|felt|seems?|is|was|are|were)\s+"
+        r"(worse|better|harder|easier|worst|bad|good|fine|okay)\b"
+        r"|^\s*(and|but|so|then|also|plus)\b"
+        r"|\b(again|still|same|as well|too)\s*[.!?]*\s*$", re.I)
+
+    # A wh-question introduces its own topic, so it is self-contained even when
+    # short ("What is mindfulness?").
+    _SELF_CONTAINED_Q = re.compile(
+        r"^\s*(what|how|why|when|who|where|which|can|could|do|does|is|are|tell)\b"
+        r"[^?]*\?*\s*$", re.I)
+
+    def has_unbound_reference(self, message: str) -> bool:
+        """A pronoun with no antecedent supplied in the same sentence."""
+        text = (message or "").strip()
+        if not text:
+            return False
+        return bool(self._PRONOUN.search(text)
+                    and not self._ANTECEDENT.search(text))
+
+    def _is_referential(self, message: str, history: List[Turn]) -> bool:
+        """True when the message needs earlier turns to be interpretable."""
+        if not history:
+            return False
+        text = (message or "").strip()
+        if not text:
+            return False
+        words = text.split()
+        # Unbound pronoun: referring to something named earlier, not here.
+        if self.has_unbound_reference(text):
+            return True
+        # Bare continuation or comparative with no subject of its own.
+        if self._CONTINUATION.search(text) and len(words) <= 12:
+            return True
+        # Very short turns are usually continuations — unless they are a
+        # self-contained question or a greeting, which start their own topic.
+        if (len(words) <= 4 and not _GREETING.match(text)
+                and not self._SELF_CONTAINED_Q.match(text)):
+            return True
+        return False
 
     def _contextual_intent_resolution(self, message: str, history: List[Turn],
                                        risk_assessment: Optional[RiskAssessment],
