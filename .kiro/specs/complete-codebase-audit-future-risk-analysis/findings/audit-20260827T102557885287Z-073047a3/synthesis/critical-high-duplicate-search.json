@@ -1,0 +1,369 @@
+{
+  "all_40_ids_preserved": true,
+  "candidate_pair_reviews": [
+    {
+      "decision": "not-duplicate",
+      "left": "ISSUE-001",
+      "reason": "Different root cause, trigger, or remediation boundary; preserve linkage through chains/secondary domains.",
+      "right": "ISSUE-002",
+      "shared_components": [
+        "ChatbotService.handle"
+      ],
+      "token_jaccard": 0.052
+    },
+    {
+      "decision": "not-duplicate",
+      "left": "ISSUE-002",
+      "reason": "Different root cause, trigger, or remediation boundary; preserve linkage through chains/secondary domains.",
+      "right": "ISSUE-006",
+      "shared_components": [
+        "ConversationRiskReasoner"
+      ],
+      "token_jaccard": 0.028
+    },
+    {
+      "decision": "not-duplicate",
+      "left": "ISSUE-002",
+      "reason": "Different root cause, trigger, or remediation boundary; preserve linkage through chains/secondary domains.",
+      "right": "ISSUE-028",
+      "shared_components": [
+        "ConversationRiskReasoner"
+      ],
+      "token_jaccard": 0.0
+    },
+    {
+      "decision": "not-duplicate",
+      "left": "ISSUE-003",
+      "reason": "Different root cause, trigger, or remediation boundary; preserve linkage through chains/secondary domains.",
+      "right": "ISSUE-009",
+      "shared_components": [
+        "ChatbotService._build_prompt"
+      ],
+      "token_jaccard": 0.059
+    },
+    {
+      "decision": "not-duplicate",
+      "left": "ISSUE-003",
+      "reason": "Different root cause, trigger, or remediation boundary; preserve linkage through chains/secondary domains.",
+      "right": "ISSUE-011",
+      "shared_components": [
+        "system_prompt"
+      ],
+      "token_jaccard": 0.056
+    },
+    {
+      "decision": "not-duplicate",
+      "left": "ISSUE-003",
+      "reason": "Different root cause, trigger, or remediation boundary; preserve linkage through chains/secondary domains.",
+      "right": "ISSUE-015",
+      "shared_components": [
+        "ChatbotService._build_prompt",
+        "system_prompt"
+      ],
+      "token_jaccard": 0.104
+    },
+    {
+      "decision": "not-duplicate",
+      "left": "ISSUE-003",
+      "reason": "Different root cause, trigger, or remediation boundary; preserve linkage through chains/secondary domains.",
+      "right": "ISSUE-028",
+      "shared_components": [
+        "ChatbotService._build_prompt"
+      ],
+      "token_jaccard": 0.101
+    },
+    {
+      "decision": "not-duplicate",
+      "left": "ISSUE-004",
+      "reason": "Different root cause, trigger, or remediation boundary; preserve linkage through chains/secondary domains.",
+      "right": "ISSUE-012",
+      "shared_components": [
+        "KnowledgeCache.refresh"
+      ],
+      "token_jaccard": 0.161
+    },
+    {
+      "decision": "not-duplicate",
+      "left": "ISSUE-004",
+      "reason": "Different root cause, trigger, or remediation boundary; preserve linkage through chains/secondary domains.",
+      "right": "ISSUE-014",
+      "shared_components": [
+        "KnowledgeCache.refresh"
+      ],
+      "token_jaccard": 0.033
+    },
+    {
+      "decision": "not-duplicate",
+      "left": "ISSUE-006",
+      "reason": "Different root cause, trigger, or remediation boundary; preserve linkage through chains/secondary domains.",
+      "right": "ISSUE-028",
+      "shared_components": [
+        "ConversationRiskReasoner"
+      ],
+      "token_jaccard": 0.013
+    },
+    {
+      "decision": "not-duplicate",
+      "left": "ISSUE-008",
+      "reason": "Different root cause, trigger, or remediation boundary; preserve linkage through chains/secondary domains.",
+      "right": "ISSUE-010",
+      "shared_components": [
+        "render.yaml"
+      ],
+      "token_jaccard": 0.0
+    },
+    {
+      "decision": "not-duplicate",
+      "left": "ISSUE-008",
+      "reason": "Different root cause, trigger, or remediation boundary; preserve linkage through chains/secondary domains.",
+      "right": "ISSUE-022",
+      "shared_components": [
+        "render.yaml"
+      ],
+      "token_jaccard": 0.041
+    },
+    {
+      "decision": "not-duplicate",
+      "left": "ISSUE-008",
+      "reason": "Different root cause, trigger, or remediation boundary; preserve linkage through chains/secondary domains.",
+      "right": "ISSUE-034",
+      "shared_components": [
+        "render.yaml"
+      ],
+      "token_jaccard": 0.0
+    },
+    {
+      "decision": "not-duplicate",
+      "left": "ISSUE-008",
+      "reason": "Different root cause, trigger, or remediation boundary; preserve linkage through chains/secondary domains.",
+      "right": "ISSUE-039",
+      "shared_components": [
+        "render.yaml"
+      ],
+      "token_jaccard": 0.024
+    },
+    {
+      "decision": "not-duplicate",
+      "left": "ISSUE-009",
+      "reason": "Different root cause, trigger, or remediation boundary; preserve linkage through chains/secondary domains.",
+      "right": "ISSUE-015",
+      "shared_components": [
+        "ChatbotService._build_prompt"
+      ],
+      "token_jaccard": 0.077
+    },
+    {
+      "decision": "not-duplicate",
+      "left": "ISSUE-009",
+      "reason": "Different root cause, trigger, or remediation boundary; preserve linkage through chains/secondary domains.",
+      "right": "ISSUE-028",
+      "shared_components": [
+        "ChatbotService._build_prompt"
+      ],
+      "token_jaccard": 0.0
+    },
+    {
+      "decision": "not-duplicate",
+      "left": "ISSUE-009",
+      "reason": "Different root cause, trigger, or remediation boundary; preserve linkage through chains/secondary domains.",
+      "right": "ISSUE-034",
+      "shared_components": [
+        "ContextCache"
+      ],
+      "token_jaccard": 0.056
+    },
+    {
+      "decision": "not-duplicate",
+      "left": "ISSUE-010",
+      "reason": "Different root cause, trigger, or remediation boundary; preserve linkage through chains/secondary domains.",
+      "right": "ISSUE-022",
+      "shared_components": [
+        "render.yaml"
+      ],
+      "token_jaccard": 0.0
+    },
+    {
+      "decision": "not-duplicate",
+      "left": "ISSUE-010",
+      "reason": "Different root cause, trigger, or remediation boundary; preserve linkage through chains/secondary domains.",
+      "right": "ISSUE-034",
+      "shared_components": [
+        "render.yaml"
+      ],
+      "token_jaccard": 0.014
+    },
+    {
+      "decision": "not-duplicate",
+      "left": "ISSUE-010",
+      "reason": "Different root cause, trigger, or remediation boundary; preserve linkage through chains/secondary domains.",
+      "right": "ISSUE-039",
+      "shared_components": [
+        "render.yaml"
+      ],
+      "token_jaccard": 0.026
+    },
+    {
+      "decision": "not-duplicate",
+      "left": "ISSUE-011",
+      "reason": "Different root cause, trigger, or remediation boundary; preserve linkage through chains/secondary domains.",
+      "right": "ISSUE-015",
+      "shared_components": [
+        "system_prompt"
+      ],
+      "token_jaccard": 0.074
+    },
+    {
+      "decision": "not-duplicate",
+      "left": "ISSUE-011",
+      "reason": "Different root cause, trigger, or remediation boundary; preserve linkage through chains/secondary domains.",
+      "right": "ISSUE-028",
+      "shared_components": [
+        "ResponseBuilder"
+      ],
+      "token_jaccard": 0.0
+    },
+    {
+      "decision": "not-duplicate",
+      "left": "ISSUE-012",
+      "reason": "Different root cause, trigger, or remediation boundary; preserve linkage through chains/secondary domains.",
+      "right": "ISSUE-014",
+      "shared_components": [
+        "KnowledgeCache.refresh"
+      ],
+      "token_jaccard": 0.098
+    },
+    {
+      "decision": "not-duplicate",
+      "left": "ISSUE-015",
+      "reason": "Different root cause, trigger, or remediation boundary; preserve linkage through chains/secondary domains.",
+      "right": "ISSUE-028",
+      "shared_components": [
+        "ChatbotService._build_prompt"
+      ],
+      "token_jaccard": 0.072
+    },
+    {
+      "decision": "not-duplicate",
+      "left": "ISSUE-017",
+      "reason": "Different root cause, trigger, or remediation boundary; preserve linkage through chains/secondary domains.",
+      "right": "ISSUE-019",
+      "shared_components": [
+        "FeedbackStore"
+      ],
+      "token_jaccard": 0.029
+    },
+    {
+      "decision": "not-duplicate",
+      "left": "ISSUE-017",
+      "reason": "Different root cause, trigger, or remediation boundary; preserve linkage through chains/secondary domains.",
+      "right": "ISSUE-026",
+      "shared_components": [
+        "ChatArchive"
+      ],
+      "token_jaccard": 0.047
+    },
+    {
+      "decision": "not-duplicate",
+      "left": "ISSUE-022",
+      "reason": "Different root cause, trigger, or remediation boundary; preserve linkage through chains/secondary domains.",
+      "right": "ISSUE-034",
+      "shared_components": [
+        "render.yaml"
+      ],
+      "token_jaccard": 0.013
+    },
+    {
+      "decision": "not-duplicate",
+      "left": "ISSUE-022",
+      "reason": "Different root cause, trigger, or remediation boundary; preserve linkage through chains/secondary domains.",
+      "right": "ISSUE-035",
+      "shared_components": [
+        "document routes"
+      ],
+      "token_jaccard": 0.03
+    },
+    {
+      "decision": "not-duplicate",
+      "left": "ISSUE-022",
+      "reason": "Different root cause, trigger, or remediation boundary; preserve linkage through chains/secondary domains.",
+      "right": "ISSUE-039",
+      "shared_components": [
+        "render.yaml"
+      ],
+      "token_jaccard": 0.025
+    },
+    {
+      "decision": "not-duplicate",
+      "left": "ISSUE-023",
+      "reason": "Different root cause, trigger, or remediation boundary; preserve linkage through chains/secondary domains.",
+      "right": "ISSUE-025",
+      "shared_components": [
+        "IdentityManager.from_request"
+      ],
+      "token_jaccard": 0.031
+    },
+    {
+      "decision": "not-duplicate",
+      "left": "ISSUE-029",
+      "reason": "Different root cause, trigger, or remediation boundary; preserve linkage through chains/secondary domains.",
+      "right": "ISSUE-031",
+      "shared_components": [
+        "tests/test_spec_compliance.py"
+      ],
+      "token_jaccard": 0.013
+    },
+    {
+      "decision": "not-duplicate",
+      "left": "ISSUE-034",
+      "reason": "Different root cause, trigger, or remediation boundary; preserve linkage through chains/secondary domains.",
+      "right": "ISSUE-035",
+      "shared_components": [
+        "KnowledgeCache"
+      ],
+      "token_jaccard": 0.057
+    },
+    {
+      "decision": "not-duplicate",
+      "left": "ISSUE-034",
+      "reason": "Different root cause, trigger, or remediation boundary; preserve linkage through chains/secondary domains.",
+      "right": "ISSUE-039",
+      "shared_components": [
+        "render.yaml"
+      ],
+      "token_jaccard": 0.023
+    }
+  ],
+  "duplicates_merged": 0,
+  "outcome": "pass",
+  "scope_count": 28,
+  "scope_ids": [
+    "ISSUE-001",
+    "ISSUE-002",
+    "ISSUE-003",
+    "ISSUE-004",
+    "ISSUE-006",
+    "ISSUE-007",
+    "ISSUE-008",
+    "ISSUE-009",
+    "ISSUE-010",
+    "ISSUE-011",
+    "ISSUE-012",
+    "ISSUE-013",
+    "ISSUE-014",
+    "ISSUE-015",
+    "ISSUE-017",
+    "ISSUE-018",
+    "ISSUE-019",
+    "ISSUE-020",
+    "ISSUE-022",
+    "ISSUE-023",
+    "ISSUE-025",
+    "ISSUE-026",
+    "ISSUE-028",
+    "ISSUE-029",
+    "ISSUE-031",
+    "ISSUE-034",
+    "ISSUE-035",
+    "ISSUE-039"
+  ]
+}

@@ -1,0 +1,27 @@
+{
+  "schema_version": "1.0",
+  "run_id": "audit-20260827T102557885287Z-073047a3",
+  "G0": {
+    "outcome": "pass",
+    "root_identity_confirmed": true,
+    "deliverable_conflict_count": 0,
+    "containment_policy_recorded": true,
+    "network_policy_recorded": true,
+    "output_allowlist_recorded": true
+  },
+  "G1": {
+    "outcome": "pass",
+    "manifest_entry_count": 470,
+    "regular_file_count": 470,
+    "hashed_regular_file_count": 470,
+    "directory_count": 230,
+    "error_count": 0,
+    "collision_count": 0,
+    "escaping_reparse_count": 0,
+    "manifest_digest_verified": true
+  },
+  "unlocks": {
+    "G2": true
+  },
+  "blocker": null
+}

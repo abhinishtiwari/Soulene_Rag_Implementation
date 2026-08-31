@@ -82,10 +82,15 @@ and running `python build_cache.py` — or upload at runtime via `POST /document
 
 | Method | Path | Purpose |
 |---|---|---|
-| `GET` | `/health` | health check |
+| `GET` | `/live` | liveness (process only; no service, no backend) |
+| `GET` | `/health` | readiness (200 only when initialized + storage reachable) |
 | `GET` | `/metrics` | cache stats + hit rate |
-| `POST` | `/chat` | JSON reply |
-| `POST` | `/chat/stream` | SSE stream |
+| `GET` | `/identity` | caller's signed permanent identity/session |
+| `POST` | `/chat` | durable idempotent JSON reply |
+| `POST` | `/chat/stream` | durable-before-`DONE` SSE reply |
+| `GET` `POST` | `/sessions` | list/create caller-owned conversations |
+| `GET` `DELETE` | `/sessions/<id>` | read/delete an owned conversation |
+| `DELETE` | `/account` | cascade-delete and revoke caller data |
 | `GET` `POST` | `/documents` | list / upload knowledge |
 | `DELETE` | `/documents/<name>` | remove document |
 | `POST` | `/feedback` | submit feedback (isolated store) |
@@ -93,14 +98,16 @@ and running `python build_cache.py` — or upload at runtime via `POST /document
 ## Tests
 
 ```bash
-python -m unittest discover -s tests -p "test_*.py"   # 254 tests, ~10s
-python -m tests.smoke_live                             # live conversational check
-python -m tests.smoke_staging                          # live staging gate (11 assertions)
+python -m pytest -q tests                            # 281 tests
+python -m tests.smoke_live                           # live conversational check
+python -m tests.smoke_staging                        # live staging gate
 ```
 
 ## Deploy to Render
 
-`render.yaml` is complete: push to GitHub → **New → Blueprint** → set `OPENAI_API_KEY` → deploy.
+`render.yaml` is a deployment blueprint: push to GitHub → **New → Blueprint** → set
+`OPENAI_API_KEY`, `API_KEY`, and a distinct `ADMIN_API_KEY` → deploy. Startup is
+fail-closed when either boundary credential is absent.
 Includes gunicorn config, `/health` check, and a 1 GB persistent disk for `data/`.
 
 ## Documentation
@@ -109,7 +116,10 @@ See **[DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md)** for architecture, CAG cache lif
 ingestion pipeline, memory layers, DB schema, API reference, deployment, security review
 and troubleshooting.
 
-> ⚠️ **Before public exposure:** set `API_KEY` and `ADMIN_API_KEY` (auth is off by default for
-> local dev) and a non-zero `RATE_LIMIT_PER_MINUTE`. Rotate your OpenAI key if it was ever
-> committed. Note `user_id` still comes from the request body — for real multi-tenancy, derive
-> it from a per-user token instead.
+> **Production security:** the Render blueprint sets `REQUIRE_API_AUTH=true`. Configure
+> `STORAGE_BACKEND=mongo`, `MONGO_URI`, `API_KEY`, and a distinct `ADMIN_API_KEY`;
+> startup fails if either boundary key is absent. Render generates `IDENTITY_SECRET`
+> and enables secure cookies.
+> User identity is derived only from a signed HttpOnly cookie or
+> `X-Soulene-Identity`, never from request JSON/query parameters. Chat writes fail
+> closed if the authoritative store is unavailable.

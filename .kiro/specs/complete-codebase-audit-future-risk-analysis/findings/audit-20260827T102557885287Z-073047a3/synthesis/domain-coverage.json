@@ -1,0 +1,241 @@
+{
+  "architecture-correctness": {
+    "limitation": "Findings are bounded to repository and isolated-test evidence.",
+    "primary_findings": [
+      "ISSUE-002",
+      "ISSUE-004"
+    ],
+    "reviewed": true,
+    "secondary_findings": [
+      "ISSUE-012",
+      "ISSUE-029",
+      "ISSUE-034",
+      "ISSUE-038"
+    ]
+  },
+  "data-database": {
+    "limitation": "Findings are bounded to repository and isolated-test evidence.",
+    "primary_findings": [
+      "ISSUE-014",
+      "ISSUE-019",
+      "ISSUE-021"
+    ],
+    "reviewed": true,
+    "secondary_findings": [
+      "ISSUE-002",
+      "ISSUE-004",
+      "ISSUE-012",
+      "ISSUE-017",
+      "ISSUE-018",
+      "ISSUE-020",
+      "ISSUE-026",
+      "ISSUE-029",
+      "ISSUE-032",
+      "ISSUE-036",
+      "ISSUE-039"
+    ]
+  },
+  "dependency-supply-chain": {
+    "limitation": "Findings are bounded to repository and isolated-test evidence.",
+    "primary_findings": [
+      "ISSUE-037"
+    ],
+    "reviewed": true,
+    "secondary_findings": [
+      "ISSUE-040"
+    ]
+  },
+  "deployment-operations": {
+    "limitation": "Findings are bounded to repository and isolated-test evidence.",
+    "primary_findings": [
+      "ISSUE-034",
+      "ISSUE-035",
+      "ISSUE-038",
+      "ISSUE-039",
+      "ISSUE-040"
+    ],
+    "reviewed": true,
+    "secondary_findings": [
+      "ISSUE-005",
+      "ISSUE-008",
+      "ISSUE-010",
+      "ISSUE-014",
+      "ISSUE-021",
+      "ISSUE-022",
+      "ISSUE-027",
+      "ISSUE-032"
+    ]
+  },
+  "general-safety": {
+    "limitation": "Findings are bounded to repository and isolated-test evidence.",
+    "primary_findings": [
+      "ISSUE-011"
+    ],
+    "reviewed": true,
+    "secondary_findings": [
+      "ISSUE-001",
+      "ISSUE-006",
+      "ISSUE-008",
+      "ISSUE-015",
+      "ISSUE-031"
+    ]
+  },
+  "input-output-fail-safe": {
+    "limitation": "Findings are bounded to repository and isolated-test evidence.",
+    "primary_findings": [
+      "ISSUE-001",
+      "ISSUE-003"
+    ],
+    "reviewed": true,
+    "secondary_findings": [
+      "ISSUE-006",
+      "ISSUE-007",
+      "ISSUE-008",
+      "ISSUE-010",
+      "ISSUE-013"
+    ]
+  },
+  "maintainability": {
+    "limitation": "No primary finding; reviewed through subsystem trace and secondary-domain evidence.",
+    "primary_findings": [],
+    "reviewed": true,
+    "secondary_findings": [
+      "ISSUE-016",
+      "ISSUE-021",
+      "ISSUE-024",
+      "ISSUE-033",
+      "ISSUE-035",
+      "ISSUE-036",
+      "ISSUE-037"
+    ]
+  },
+  "memory-context": {
+    "limitation": "Findings are bounded to repository and isolated-test evidence.",
+    "primary_findings": [
+      "ISSUE-015"
+    ],
+    "reviewed": true,
+    "secondary_findings": [
+      "ISSUE-003",
+      "ISSUE-009",
+      "ISSUE-018",
+      "ISSUE-028",
+      "ISSUE-034"
+    ]
+  },
+  "mental-health-safety": {
+    "limitation": "Findings are bounded to repository and isolated-test evidence.",
+    "primary_findings": [
+      "ISSUE-006",
+      "ISSUE-007",
+      "ISSUE-008",
+      "ISSUE-009",
+      "ISSUE-010"
+    ],
+    "reviewed": true,
+    "secondary_findings": [
+      "ISSUE-001",
+      "ISSUE-002",
+      "ISSUE-011",
+      "ISSUE-013",
+      "ISSUE-015",
+      "ISSUE-016",
+      "ISSUE-017",
+      "ISSUE-020",
+      "ISSUE-026",
+      "ISSUE-028",
+      "ISSUE-030",
+      "ISSUE-031",
+      "ISSUE-034",
+      "ISSUE-039"
+    ]
+  },
+  "performance-reliability": {
+    "limitation": "Findings are bounded to repository and isolated-test evidence.",
+    "primary_findings": [
+      "ISSUE-024",
+      "ISSUE-036"
+    ],
+    "reviewed": true,
+    "secondary_findings": [
+      "ISSUE-002",
+      "ISSUE-004",
+      "ISSUE-007",
+      "ISSUE-014",
+      "ISSUE-019",
+      "ISSUE-023",
+      "ISSUE-030",
+      "ISSUE-034",
+      "ISSUE-035",
+      "ISSUE-038",
+      "ISSUE-039"
+    ]
+  },
+  "privacy": {
+    "limitation": "Findings are bounded to repository and isolated-test evidence.",
+    "primary_findings": [
+      "ISSUE-017",
+      "ISSUE-018",
+      "ISSUE-020",
+      "ISSUE-026",
+      "ISSUE-028"
+    ],
+    "reviewed": true,
+    "secondary_findings": [
+      "ISSUE-003",
+      "ISSUE-009",
+      "ISSUE-011",
+      "ISSUE-019",
+      "ISSUE-025"
+    ]
+  },
+  "rag-cag": {
+    "limitation": "Findings are bounded to repository and isolated-test evidence.",
+    "primary_findings": [
+      "ISSUE-012",
+      "ISSUE-013",
+      "ISSUE-016"
+    ],
+    "reviewed": true,
+    "secondary_findings": [
+      "ISSUE-004",
+      "ISSUE-022",
+      "ISSUE-034",
+      "ISSUE-035"
+    ]
+  },
+  "security": {
+    "limitation": "Findings are bounded to repository and isolated-test evidence.",
+    "primary_findings": [
+      "ISSUE-005",
+      "ISSUE-022",
+      "ISSUE-023",
+      "ISSUE-025",
+      "ISSUE-027"
+    ],
+    "reviewed": true,
+    "secondary_findings": [
+      "ISSUE-003",
+      "ISSUE-015",
+      "ISSUE-020",
+      "ISSUE-024",
+      "ISSUE-026",
+      "ISSUE-034",
+      "ISSUE-037"
+    ]
+  },
+  "testing-quality": {
+    "limitation": "Findings are bounded to repository and isolated-test evidence.",
+    "primary_findings": [
+      "ISSUE-029",
+      "ISSUE-030",
+      "ISSUE-031",
+      "ISSUE-032",
+      "ISSUE-033"
+    ],
+    "reviewed": true,
+    "secondary_findings": [
+      "ISSUE-040"
+    ]
+  }
+}

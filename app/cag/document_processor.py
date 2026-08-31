@@ -236,14 +236,18 @@ _EXTRACTORS = {
 }
 
 
-def process_document(path: Path, knowledge_type: str = "general") -> List[Section]:
+def process_document(path: Path, knowledge_type: str = "general",
+                     document_id: str = "") -> List[Section]:
     """Extract a document into clean, structured sections."""
     ext = path.suffix.lower()
     extractor = _EXTRACTORS.get(ext)
     if extractor is None:
         return []
     meta: Dict[str, object] = {
-        "document": path.name,
+        # `document` is the cache identity and is supplied by the caller when it
+        # knows the canonical relative path; the basename is only a fallback.
+        "document": document_id or path.name,
+        "display_name": path.name,
         "knowledge_type": knowledge_type,
         "format": ext.lstrip("."),
     }

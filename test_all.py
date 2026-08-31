@@ -1,6 +1,25 @@
-"""MASTER TEST: Run all test suites for the context-aware safety fixes."""
+"""MASTER TEST: Run all test suites for the context-aware safety fixes.
+
+Lane `safety-diagnostic` in `tests/lanes.py`. This is a human-readable
+walkthrough, not gating evidence — `tests/test_safety_matrix.py` is what gates.
+Run it with `python test_all.py`.
+"""
 import os
 import sys
+
+# ISSUE-033: this script prints check marks and arrows. On a Windows console
+# (cp1252) that raised UnicodeEncodeError and the script exited 1 *after* every
+# check had passed, so a green run looked like a failure.
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(errors="replace")  # keep the console encoding
+
+# ISSUE-033: bind a temporary project root BEFORE any application module builds
+# Settings, otherwise this script resolves every writable path into the working
+# repository.
+from tests.sandbox import activate_sandbox
+
+activate_sandbox("soulene-diagnostic-")
+
 os.environ.setdefault("OPENAI_API_KEY", "test-key")
 
 from app.safety.reasoner import ConversationRiskReasoner

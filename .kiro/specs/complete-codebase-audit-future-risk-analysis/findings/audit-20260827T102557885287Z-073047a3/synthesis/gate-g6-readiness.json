@@ -1,0 +1,9 @@
+{
+  "coverage_reconciled": true,
+  "final_g8_pending": true,
+  "gate": "G6",
+  "outcome": "pass",
+  "readiness_conclusion": "not-ready",
+  "release_blocker_count": 32,
+  "run_id": "audit-20260827T102557885287Z-073047a3"
+}

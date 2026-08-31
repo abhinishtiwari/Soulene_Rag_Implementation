@@ -1,0 +1,14 @@
+{
+  "counterexample": "AssertionError: valid({'conclusion': 'conditionally-ready', 'integrity_ok': True, 'p0': [], 'p1': ['P1-5'], ...}) returned False at test_property_9.py:54 because the generated conditionally-ready record had no pre-production condition.",
+  "examples_completed_before_failure": 5,
+  "exit_code": 1,
+  "failure_classification": "test-defect: generator constructed an invalid record as the expected-valid case",
+  "framework": "pytest deterministic generated-input property harness (Hypothesis unavailable; no network installation permitted)",
+  "output_summary": "1 failed in 0.12s",
+  "property": "Property 9: Readiness gating is deterministic and fail-closed",
+  "rerun_performed": false,
+  "run_id": "audit-20260827T102557885287Z-073047a3",
+  "schema_version": "1.0",
+  "status": "failed",
+  "task": "8.4 Write the property test for deterministic readiness gating"
+}

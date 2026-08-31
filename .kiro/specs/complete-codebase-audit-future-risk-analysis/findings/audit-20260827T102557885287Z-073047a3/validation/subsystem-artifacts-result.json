@@ -1,0 +1,9 @@
+{
+  "errors": 0,
+  "failures": 0,
+  "outcome": "pass",
+  "run_id": "audit-20260827T102557885287Z-073047a3",
+  "schema_version": "1.0",
+  "test_file": "validation/test_subsystem_artifacts.py",
+  "tests_run": 4
+}

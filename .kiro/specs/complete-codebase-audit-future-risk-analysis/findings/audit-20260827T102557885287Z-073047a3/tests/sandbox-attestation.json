@@ -1,0 +1,2051 @@
+{
+  "copied_input_count": 65,
+  "copied_inputs_ref": "sandbox/copied-inputs.jsonl",
+  "environment_allowlist_digest": "6e4729ad87dd3d51408d6f6f9877ec9b23d1c5a0446a106dc09887629c15394d",
+  "environment_key_names": [
+    "ADMIN_API_KEY",
+    "ALL_PROXY",
+    "API_KEY",
+    "COMSPEC",
+    "DATABASE_URL",
+    "ENABLE_INPUT_MODERATION",
+    "ENABLE_OUTPUT_SAFETY_CHECK",
+    "ENABLE_SEMANTIC_SAFETY",
+    "HOME",
+    "HTTPS_PROXY",
+    "HTTP_PROXY",
+    "IDENTITY_SECRET",
+    "LOG_LEVEL",
+    "MONGO_URI",
+    "NO_PROXY",
+    "NUMBER_OF_PROCESSORS",
+    "OPENAI_API_KEY",
+    "PATH",
+    "PATHEXT",
+    "PYTEST_DISABLE_PLUGIN_AUTOLOAD",
+    "PYTHONDONTWRITEBYTECODE",
+    "PYTHONIOENCODING",
+    "PYTHONPATH",
+    "PYTHONUNBUFFERED",
+    "RUN_MONGO_INTEGRATION",
+    "SOULENE_SKIP_WARM",
+    "STAGING_API_KEY",
+    "STAGING_URL",
+    "STORAGE_BACKEND",
+    "SYSTEMROOT",
+    "TEMP",
+    "TMP",
+    "TMPDIR",
+    "USERPROFILE",
+    "WINDIR",
+    "XDG_CACHE_HOME"
+  ],
+  "environment_values_persisted": false,
+  "generated_fixture_refs": [
+    "sandbox/control/sitecustomize.py"
+  ],
+  "integrity_ok": true,
+  "network_denial_mechanism": "sitecustomize Python socket constructor/connect/DNS denial inherited by child Python processes",
+  "network_probe": {
+    "command": "C:\\Users\\abhin\\AppData\\Local\\Programs\\Python\\Python314\\python.exe -c \"import socket; ok=0\nfor action in (lambda: socket.getaddrinfo('example.invalid',443), lambda: socket.socket()):\n  try: action()\n  except PermissionError: ok+=1\nraise SystemExit(0 if ok==2 else 9)\"",
+    "duration_ms": 356,
+    "exit_status": 0,
+    "mechanism": "sitecustomize Python socket constructor/connect/DNS denial inherited by child Python processes",
+    "passed": true
+  },
+  "network_probe_result": "pass",
+  "omitted_sensitive_classes": [
+    "live .env and credentials",
+    "persistent databases/data",
+    "identity material",
+    "user conversations",
+    "Git metadata",
+    "baseline caches and bytecode"
+  ],
+  "path_containment_ok": true,
+  "post_live_snapshot_ref": "tests/protected-after.json",
+  "pre_live_snapshot_ref": "tests/protected-before.json",
+  "process_inventory_after": [
+    {
+      "image": "System Idle Process",
+      "pid": 0
+    },
+    {
+      "image": "System",
+      "pid": 4
+    },
+    {
+      "image": "Secure System",
+      "pid": 188
+    },
+    {
+      "image": "Registry",
+      "pid": 232
+    },
+    {
+      "image": "csrss.exe",
+      "pid": 724
+    },
+    {
+      "image": "smss.exe",
+      "pid": 736
+    },
+    {
+      "image": "wininit.exe",
+      "pid": 1104
+    },
+    {
+      "image": "csrss.exe",
+      "pid": 1112
+    },
+    {
+      "image": "winlogon.exe",
+      "pid": 1200
+    },
+    {
+      "image": "services.exe",
+      "pid": 1220
+    },
+    {
+      "image": "LsaIso.exe",
+      "pid": 1264
+    },
+    {
+      "image": "lsass.exe",
+      "pid": 1272
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 1412
+    },
+    {
+      "image": "fontdrvhost.exe",
+      "pid": 1444
+    },
+    {
+      "image": "fontdrvhost.exe",
+      "pid": 1452
+    },
+    {
+      "image": "WUDFHost.exe",
+      "pid": 1460
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 1516
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 1524
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 1572
+    },
+    {
+      "image": "WUDFHost.exe",
+      "pid": 1592
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 1632
+    },
+    {
+      "image": "WUDFHost.exe",
+      "pid": 1676
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 1728
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 1768
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 1808
+    },
+    {
+      "image": "dwm.exe",
+      "pid": 1824
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 1844
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 1864
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 1876
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 1904
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 2060
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 2084
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 2108
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 2160
+    },
+    {
+      "image": "Kiro.exe",
+      "pid": 2180
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 2224
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 2232
+    },
+    {
+      "image": "IntelCpHDCPSvc.exe",
+      "pid": 2268
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 2300
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 2324
+    },
+    {
+      "image": "conhost.exe",
+      "pid": 2348
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 2372
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 2392
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 2452
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 2532
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 2560
+    },
+    {
+      "image": "powershell.exe",
+      "pid": 2580
+    },
+    {
+      "image": "msedge.exe",
+      "pid": 2780
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 2796
+    },
+    {
+      "image": "msedge.exe",
+      "pid": 2832
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 2848
+    },
+    {
+      "image": "msedge.exe",
+      "pid": 2856
+    },
+    {
+      "image": "NVDisplay.Container.exe",
+      "pid": 3080
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 3088
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 3136
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 3196
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 3260
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 3268
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 3276
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 3292
+    },
+    {
+      "image": "Memory Compression",
+      "pid": 3364
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 3416
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 3424
+    },
+    {
+      "image": "dasHost.exe",
+      "pid": 3464
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 3496
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 3520
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 3540
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 3548
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 3620
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 3636
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 3720
+    },
+    {
+      "image": "ipfsvc.exe",
+      "pid": 3756
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 3760
+    },
+    {
+      "image": "Kiro.exe",
+      "pid": 3796
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 3868
+    },
+    {
+      "image": "identity_helper.exe",
+      "pid": 3932
+    },
+    {
+      "image": "FnKey.exe",
+      "pid": 3980
+    },
+    {
+      "image": "msedge.exe",
+      "pid": 4008
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 4088
+    },
+    {
+      "image": "msedge.exe",
+      "pid": 4100
+    },
+    {
+      "image": "msedge.exe",
+      "pid": 4188
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 4200
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 4220
+    },
+    {
+      "image": "NVDisplay.Container.exe",
+      "pid": 4232
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 4260
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 4296
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 4448
+    },
+    {
+      "image": "IntelAudioService.exe",
+      "pid": 4472
+    },
+    {
+      "image": "spoolsv.exe",
+      "pid": 4536
+    },
+    {
+      "image": "taskhostw.exe",
+      "pid": 4600
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 4616
+    },
+    {
+      "image": "WmiPrvSE.exe",
+      "pid": 4756
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 4764
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 4820
+    },
+    {
+      "image": "ipf_uf.exe",
+      "pid": 4844
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 5032
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 5076
+    },
+    {
+      "image": "DCHUService.exe",
+      "pid": 5084
+    },
+    {
+      "image": "GameInputRedistService.exe",
+      "pid": 5100
+    },
+    {
+      "image": "GooglePlayGamesServices.exe",
+      "pid": 5116
+    },
+    {
+      "image": "HKClipSvc.exe",
+      "pid": 5124
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 5132
+    },
+    {
+      "image": "jhi_service.exe",
+      "pid": 5152
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 5160
+    },
+    {
+      "image": "MpDefenderCoreService.exe",
+      "pid": 5192
+    },
+    {
+      "image": "Kiro.exe",
+      "pid": 5204
+    },
+    {
+      "image": "OfficeClickToRun.exe",
+      "pid": 5236
+    },
+    {
+      "image": "mysqld.exe",
+      "pid": 5268
+    },
+    {
+      "image": "WsNativePushService.exe",
+      "pid": 5360
+    },
+    {
+      "image": "msedge.exe",
+      "pid": 5416
+    },
+    {
+      "image": "PresentMonService.exe",
+      "pid": 5536
+    },
+    {
+      "image": "RtkAudUService64.exe",
+      "pid": 5540
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 5560
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 5576
+    },
+    {
+      "image": "WMIRegistrationService.exe",
+      "pid": 5584
+    },
+    {
+      "image": "MsMpEng.exe",
+      "pid": 5592
+    },
+    {
+      "image": "wslservice.exe",
+      "pid": 5620
+    },
+    {
+      "image": "RuntimeBroker.exe",
+      "pid": 5656
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 5764
+    },
+    {
+      "image": "tasklist.exe",
+      "pid": 5852
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 5916
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 5984
+    },
+    {
+      "image": "msedge.exe",
+      "pid": 6008
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 6152
+    },
+    {
+      "image": "msedge.exe",
+      "pid": 6200
+    },
+    {
+      "image": "chrome.exe",
+      "pid": 6244
+    },
+    {
+      "image": "sihost.exe",
+      "pid": 6272
+    },
+    {
+      "image": "mysqld.exe",
+      "pid": 6348
+    },
+    {
+      "image": "conhost.exe",
+      "pid": 6420
+    },
+    {
+      "image": "WidgetService.exe",
+      "pid": 6576
+    },
+    {
+      "image": "msedge.exe",
+      "pid": 6592
+    },
+    {
+      "image": "SearchProtocolHost.exe",
+      "pid": 7056
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 7080
+    },
+    {
+      "image": "chrome.exe",
+      "pid": 7152
+    },
+    {
+      "image": "msedge.exe",
+      "pid": 7208
+    },
+    {
+      "image": "GameInputRedistService.exe",
+      "pid": 7216
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 7232
+    },
+    {
+      "image": "crashpad_handler.exe",
+      "pid": 7292
+    },
+    {
+      "image": "NgcIso.exe",
+      "pid": 7316
+    },
+    {
+      "image": "IntelGraphicsSoftware.Service.exe",
+      "pid": 7392
+    },
+    {
+      "image": "ShellHost.exe",
+      "pid": 7420
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 7424
+    },
+    {
+      "image": "ipf_helper.exe",
+      "pid": 7460
+    },
+    {
+      "image": "gamingservicesnet.exe",
+      "pid": 7636
+    },
+    {
+      "image": "msedge.exe",
+      "pid": 7648
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 7668
+    },
+    {
+      "image": "MSPCManagerService.exe",
+      "pid": 7784
+    },
+    {
+      "image": "gamingservices.exe",
+      "pid": 7872
+    },
+    {
+      "image": "msedge.exe",
+      "pid": 7948
+    },
+    {
+      "image": "chrome.exe",
+      "pid": 8148
+    },
+    {
+      "image": "ctfmon.exe",
+      "pid": 8244
+    },
+    {
+      "image": "wlanext.exe",
+      "pid": 8332
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 8512
+    },
+    {
+      "image": "conhost.exe",
+      "pid": 8548
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 8612
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 8668
+    },
+    {
+      "image": "AggregatorHost.exe",
+      "pid": 8696
+    },
+    {
+      "image": "chrome.exe",
+      "pid": 8728
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 8848
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 8988
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 9028
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 9160
+    },
+    {
+      "image": "OpenConsole.exe",
+      "pid": 9608
+    },
+    {
+      "image": "explorer.exe",
+      "pid": 9888
+    },
+    {
+      "image": "msedge.exe",
+      "pid": 9920
+    },
+    {
+      "image": "msedgewebview2.exe",
+      "pid": 10068
+    },
+    {
+      "image": "GameInputSvc.exe",
+      "pid": 10104
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 10116
+    },
+    {
+      "image": "msedge.exe",
+      "pid": 10124
+    },
+    {
+      "image": "GameInputSvc.exe",
+      "pid": 10132
+    },
+    {
+      "image": "TextInputHost.exe",
+      "pid": 10152
+    },
+    {
+      "image": "NisSrv.exe",
+      "pid": 10236
+    },
+    {
+      "image": "CrossDeviceService.exe",
+      "pid": 10428
+    },
+    {
+      "image": "CrossDeviceResume.exe",
+      "pid": 10484
+    },
+    {
+      "image": "M365Copilot.exe",
+      "pid": 10584
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 10712
+    },
+    {
+      "image": "FilmoraTray.exe",
+      "pid": 11028
+    },
+    {
+      "image": "RuntimeBroker.exe",
+      "pid": 11124
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 11176
+    },
+    {
+      "image": "OpenConsole.exe",
+      "pid": 11268
+    },
+    {
+      "image": "SearchHost.exe",
+      "pid": 11504
+    },
+    {
+      "image": "StartMenuExperienceHost.exe",
+      "pid": 11512
+    },
+    {
+      "image": "WhatsApp.Root.exe",
+      "pid": 11528
+    },
+    {
+      "image": "WidgetBoard.exe",
+      "pid": 11728
+    },
+    {
+      "image": "RuntimeBroker.exe",
+      "pid": 11776
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 11828
+    },
+    {
+      "image": "msedge.exe",
+      "pid": 12036
+    },
+    {
+      "image": "msedge.exe",
+      "pid": 12048
+    },
+    {
+      "image": "WsToastNotification.exe",
+      "pid": 12116
+    },
+    {
+      "image": "conhost.exe",
+      "pid": 12156
+    },
+    {
+      "image": "Kiro.exe",
+      "pid": 12272
+    },
+    {
+      "image": "ApplicationFrameHost.exe",
+      "pid": 12336
+    },
+    {
+      "image": "msedgewebview2.exe",
+      "pid": 12408
+    },
+    {
+      "image": "msedgewebview2.exe",
+      "pid": 12508
+    },
+    {
+      "image": "Kiro.exe",
+      "pid": 12568
+    },
+    {
+      "image": "msedge.exe",
+      "pid": 12640
+    },
+    {
+      "image": "Kiro.exe",
+      "pid": 12680
+    },
+    {
+      "image": "WmiPrvSE.exe",
+      "pid": 12752
+    },
+    {
+      "image": "msedgewebview2.exe",
+      "pid": 13016
+    },
+    {
+      "image": "msedgewebview2.exe",
+      "pid": 13060
+    },
+    {
+      "image": "msedgewebview2.exe",
+      "pid": 13140
+    },
+    {
+      "image": "PhoneExperienceHost.exe",
+      "pid": 13364
+    },
+    {
+      "image": "SearchIndexer.exe",
+      "pid": 13500
+    },
+    {
+      "image": "msedge.exe",
+      "pid": 13512
+    },
+    {
+      "image": "powershell.exe",
+      "pid": 13552
+    },
+    {
+      "image": "RuntimeBroker.exe",
+      "pid": 13640
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 13772
+    },
+    {
+      "image": "audiodg.exe",
+      "pid": 13808
+    },
+    {
+      "image": "msedge.exe",
+      "pid": 13848
+    },
+    {
+      "image": "MicrosoftStartFeedProvider.exe",
+      "pid": 13936
+    },
+    {
+      "image": "UserOOBEBroker.exe",
+      "pid": 14028
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 14140
+    },
+    {
+      "image": "Kiro.exe",
+      "pid": 14180
+    },
+    {
+      "image": "OneDrive.Sync.Service.exe",
+      "pid": 14208
+    },
+    {
+      "image": "chrome.exe",
+      "pid": 14584
+    },
+    {
+      "image": "SecurityHealthSystray.exe",
+      "pid": 14600
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 14636
+    },
+    {
+      "image": "SecurityHealthService.exe",
+      "pid": 14640
+    },
+    {
+      "image": "RtkAudUService64.exe",
+      "pid": 14728
+    },
+    {
+      "image": "chrome.exe",
+      "pid": 14840
+    },
+    {
+      "image": "chrome.exe",
+      "pid": 14860
+    },
+    {
+      "image": "chrome.exe",
+      "pid": 15044
+    },
+    {
+      "image": "chrome.exe",
+      "pid": 15060
+    },
+    {
+      "image": "chrome.exe",
+      "pid": 15164
+    },
+    {
+      "image": "msedge.exe",
+      "pid": 15212
+    },
+    {
+      "image": "Kiro.exe",
+      "pid": 15436
+    },
+    {
+      "image": "RuntimeBroker.exe",
+      "pid": 15496
+    },
+    {
+      "image": "msedgewebview2.exe",
+      "pid": 15652
+    },
+    {
+      "image": "msedgewebview2.exe",
+      "pid": 15688
+    },
+    {
+      "image": "Kiro.exe",
+      "pid": 15828
+    },
+    {
+      "image": "SystemSettings.exe",
+      "pid": 15900
+    },
+    {
+      "image": "msedgewebview2.exe",
+      "pid": 15948
+    },
+    {
+      "image": "msedgewebview2.exe",
+      "pid": 15956
+    },
+    {
+      "image": "msedgewebview2.exe",
+      "pid": 16016
+    },
+    {
+      "image": "msedgewebview2.exe",
+      "pid": 16208
+    },
+    {
+      "image": "Kiro.exe",
+      "pid": 16556
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 16640
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 16740
+    },
+    {
+      "image": "msedge.exe",
+      "pid": 16780
+    },
+    {
+      "image": "AppActions.exe",
+      "pid": 16796
+    },
+    {
+      "image": "Kiro.exe",
+      "pid": 16816
+    },
+    {
+      "image": "Kiro.exe",
+      "pid": 16908
+    },
+    {
+      "image": "msedge.exe",
+      "pid": 16928
+    },
+    {
+      "image": "python.exe",
+      "pid": 16960
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 16980
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 17204
+    },
+    {
+      "image": "Kiro.exe",
+      "pid": 17648
+    },
+    {
+      "image": "chrome.exe",
+      "pid": 17740
+    },
+    {
+      "image": "RuntimeBroker.exe",
+      "pid": 17984
+    },
+    {
+      "image": "msedge.exe",
+      "pid": 18096
+    },
+    {
+      "image": "msedge.exe",
+      "pid": 18108
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 18188
+    },
+    {
+      "image": "msedge.exe",
+      "pid": 18308
+    }
+  ],
+  "process_inventory_before": [
+    {
+      "image": "System Idle Process",
+      "pid": 0
+    },
+    {
+      "image": "System",
+      "pid": 4
+    },
+    {
+      "image": "Secure System",
+      "pid": 188
+    },
+    {
+      "image": "Registry",
+      "pid": 232
+    },
+    {
+      "image": "csrss.exe",
+      "pid": 724
+    },
+    {
+      "image": "smss.exe",
+      "pid": 736
+    },
+    {
+      "image": "wininit.exe",
+      "pid": 1104
+    },
+    {
+      "image": "csrss.exe",
+      "pid": 1112
+    },
+    {
+      "image": "winlogon.exe",
+      "pid": 1200
+    },
+    {
+      "image": "services.exe",
+      "pid": 1220
+    },
+    {
+      "image": "LsaIso.exe",
+      "pid": 1264
+    },
+    {
+      "image": "lsass.exe",
+      "pid": 1272
+    },
+    {
+      "image": "tasklist.exe",
+      "pid": 1372
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 1412
+    },
+    {
+      "image": "fontdrvhost.exe",
+      "pid": 1444
+    },
+    {
+      "image": "fontdrvhost.exe",
+      "pid": 1452
+    },
+    {
+      "image": "WUDFHost.exe",
+      "pid": 1460
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 1516
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 1524
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 1572
+    },
+    {
+      "image": "WUDFHost.exe",
+      "pid": 1592
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 1632
+    },
+    {
+      "image": "WUDFHost.exe",
+      "pid": 1676
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 1728
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 1768
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 1808
+    },
+    {
+      "image": "dwm.exe",
+      "pid": 1824
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 1844
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 1864
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 1876
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 1904
+    },
+    {
+      "image": "msedge.exe",
+      "pid": 1928
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 2060
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 2084
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 2108
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 2160
+    },
+    {
+      "image": "Kiro.exe",
+      "pid": 2180
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 2224
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 2232
+    },
+    {
+      "image": "IntelCpHDCPSvc.exe",
+      "pid": 2268
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 2300
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 2324
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 2372
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 2392
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 2452
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 2532
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 2560
+    },
+    {
+      "image": "powershell.exe",
+      "pid": 2580
+    },
+    {
+      "image": "chrome.exe",
+      "pid": 2624
+    },
+    {
+      "image": "msedge.exe",
+      "pid": 2780
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 2796
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 2848
+    },
+    {
+      "image": "msedge.exe",
+      "pid": 2856
+    },
+    {
+      "image": "NVDisplay.Container.exe",
+      "pid": 3080
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 3088
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 3136
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 3196
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 3260
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 3268
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 3276
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 3292
+    },
+    {
+      "image": "conhost.exe",
+      "pid": 3300
+    },
+    {
+      "image": "Memory Compression",
+      "pid": 3364
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 3416
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 3424
+    },
+    {
+      "image": "dasHost.exe",
+      "pid": 3464
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 3496
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 3520
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 3540
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 3548
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 3620
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 3636
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 3720
+    },
+    {
+      "image": "ipfsvc.exe",
+      "pid": 3756
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 3760
+    },
+    {
+      "image": "Kiro.exe",
+      "pid": 3796
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 3868
+    },
+    {
+      "image": "identity_helper.exe",
+      "pid": 3932
+    },
+    {
+      "image": "FnKey.exe",
+      "pid": 3980
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 4088
+    },
+    {
+      "image": "msedge.exe",
+      "pid": 4188
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 4200
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 4220
+    },
+    {
+      "image": "NVDisplay.Container.exe",
+      "pid": 4232
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 4260
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 4296
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 4448
+    },
+    {
+      "image": "IntelAudioService.exe",
+      "pid": 4472
+    },
+    {
+      "image": "spoolsv.exe",
+      "pid": 4536
+    },
+    {
+      "image": "taskhostw.exe",
+      "pid": 4600
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 4616
+    },
+    {
+      "image": "WmiPrvSE.exe",
+      "pid": 4756
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 4764
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 4820
+    },
+    {
+      "image": "ipf_uf.exe",
+      "pid": 4844
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 5032
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 5076
+    },
+    {
+      "image": "DCHUService.exe",
+      "pid": 5084
+    },
+    {
+      "image": "GameInputRedistService.exe",
+      "pid": 5100
+    },
+    {
+      "image": "GooglePlayGamesServices.exe",
+      "pid": 5116
+    },
+    {
+      "image": "HKClipSvc.exe",
+      "pid": 5124
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 5132
+    },
+    {
+      "image": "jhi_service.exe",
+      "pid": 5152
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 5160
+    },
+    {
+      "image": "MpDefenderCoreService.exe",
+      "pid": 5192
+    },
+    {
+      "image": "Kiro.exe",
+      "pid": 5204
+    },
+    {
+      "image": "OfficeClickToRun.exe",
+      "pid": 5236
+    },
+    {
+      "image": "mysqld.exe",
+      "pid": 5268
+    },
+    {
+      "image": "WsNativePushService.exe",
+      "pid": 5360
+    },
+    {
+      "image": "PresentMonService.exe",
+      "pid": 5536
+    },
+    {
+      "image": "RtkAudUService64.exe",
+      "pid": 5540
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 5560
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 5576
+    },
+    {
+      "image": "WMIRegistrationService.exe",
+      "pid": 5584
+    },
+    {
+      "image": "MsMpEng.exe",
+      "pid": 5592
+    },
+    {
+      "image": "wslservice.exe",
+      "pid": 5620
+    },
+    {
+      "image": "RuntimeBroker.exe",
+      "pid": 5656
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 5764
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 5916
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 5984
+    },
+    {
+      "image": "msedge.exe",
+      "pid": 6008
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 6152
+    },
+    {
+      "image": "chrome.exe",
+      "pid": 6244
+    },
+    {
+      "image": "sihost.exe",
+      "pid": 6272
+    },
+    {
+      "image": "mysqld.exe",
+      "pid": 6348
+    },
+    {
+      "image": "conhost.exe",
+      "pid": 6420
+    },
+    {
+      "image": "WidgetService.exe",
+      "pid": 6576
+    },
+    {
+      "image": "SearchProtocolHost.exe",
+      "pid": 7056
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 7080
+    },
+    {
+      "image": "chrome.exe",
+      "pid": 7152
+    },
+    {
+      "image": "GameInputRedistService.exe",
+      "pid": 7216
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 7232
+    },
+    {
+      "image": "crashpad_handler.exe",
+      "pid": 7292
+    },
+    {
+      "image": "NgcIso.exe",
+      "pid": 7316
+    },
+    {
+      "image": "IntelGraphicsSoftware.Service.exe",
+      "pid": 7392
+    },
+    {
+      "image": "ShellHost.exe",
+      "pid": 7420
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 7424
+    },
+    {
+      "image": "ipf_helper.exe",
+      "pid": 7460
+    },
+    {
+      "image": "gamingservicesnet.exe",
+      "pid": 7636
+    },
+    {
+      "image": "msedge.exe",
+      "pid": 7648
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 7668
+    },
+    {
+      "image": "MSPCManagerService.exe",
+      "pid": 7784
+    },
+    {
+      "image": "gamingservices.exe",
+      "pid": 7872
+    },
+    {
+      "image": "msedge.exe",
+      "pid": 7948
+    },
+    {
+      "image": "ctfmon.exe",
+      "pid": 8244
+    },
+    {
+      "image": "wlanext.exe",
+      "pid": 8332
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 8512
+    },
+    {
+      "image": "conhost.exe",
+      "pid": 8548
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 8612
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 8668
+    },
+    {
+      "image": "AggregatorHost.exe",
+      "pid": 8696
+    },
+    {
+      "image": "chrome.exe",
+      "pid": 8728
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 8848
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 8988
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 9160
+    },
+    {
+      "image": "OpenConsole.exe",
+      "pid": 9608
+    },
+    {
+      "image": "explorer.exe",
+      "pid": 9888
+    },
+    {
+      "image": "msedge.exe",
+      "pid": 9920
+    },
+    {
+      "image": "msedgewebview2.exe",
+      "pid": 10068
+    },
+    {
+      "image": "GameInputSvc.exe",
+      "pid": 10104
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 10116
+    },
+    {
+      "image": "msedge.exe",
+      "pid": 10124
+    },
+    {
+      "image": "GameInputSvc.exe",
+      "pid": 10132
+    },
+    {
+      "image": "TextInputHost.exe",
+      "pid": 10152
+    },
+    {
+      "image": "NisSrv.exe",
+      "pid": 10236
+    },
+    {
+      "image": "CrossDeviceService.exe",
+      "pid": 10428
+    },
+    {
+      "image": "CrossDeviceResume.exe",
+      "pid": 10484
+    },
+    {
+      "image": "M365Copilot.exe",
+      "pid": 10584
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 10712
+    },
+    {
+      "image": "FilmoraTray.exe",
+      "pid": 11028
+    },
+    {
+      "image": "RuntimeBroker.exe",
+      "pid": 11124
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 11176
+    },
+    {
+      "image": "OpenConsole.exe",
+      "pid": 11268
+    },
+    {
+      "image": "SearchHost.exe",
+      "pid": 11504
+    },
+    {
+      "image": "StartMenuExperienceHost.exe",
+      "pid": 11512
+    },
+    {
+      "image": "WhatsApp.Root.exe",
+      "pid": 11528
+    },
+    {
+      "image": "WidgetBoard.exe",
+      "pid": 11728
+    },
+    {
+      "image": "RuntimeBroker.exe",
+      "pid": 11776
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 11828
+    },
+    {
+      "image": "WsToastNotification.exe",
+      "pid": 12116
+    },
+    {
+      "image": "conhost.exe",
+      "pid": 12156
+    },
+    {
+      "image": "Kiro.exe",
+      "pid": 12272
+    },
+    {
+      "image": "ApplicationFrameHost.exe",
+      "pid": 12336
+    },
+    {
+      "image": "msedgewebview2.exe",
+      "pid": 12408
+    },
+    {
+      "image": "msedgewebview2.exe",
+      "pid": 12508
+    },
+    {
+      "image": "Kiro.exe",
+      "pid": 12568
+    },
+    {
+      "image": "Kiro.exe",
+      "pid": 12680
+    },
+    {
+      "image": "WmiPrvSE.exe",
+      "pid": 12752
+    },
+    {
+      "image": "msedgewebview2.exe",
+      "pid": 13016
+    },
+    {
+      "image": "msedgewebview2.exe",
+      "pid": 13060
+    },
+    {
+      "image": "msedgewebview2.exe",
+      "pid": 13140
+    },
+    {
+      "image": "PhoneExperienceHost.exe",
+      "pid": 13364
+    },
+    {
+      "image": "SearchIndexer.exe",
+      "pid": 13500
+    },
+    {
+      "image": "powershell.exe",
+      "pid": 13552
+    },
+    {
+      "image": "RuntimeBroker.exe",
+      "pid": 13640
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 13772
+    },
+    {
+      "image": "msedge.exe",
+      "pid": 13848
+    },
+    {
+      "image": "MicrosoftStartFeedProvider.exe",
+      "pid": 13936
+    },
+    {
+      "image": "UserOOBEBroker.exe",
+      "pid": 14028
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 14140
+    },
+    {
+      "image": "Kiro.exe",
+      "pid": 14180
+    },
+    {
+      "image": "OneDrive.Sync.Service.exe",
+      "pid": 14208
+    },
+    {
+      "image": "SecurityHealthSystray.exe",
+      "pid": 14600
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 14636
+    },
+    {
+      "image": "SecurityHealthService.exe",
+      "pid": 14640
+    },
+    {
+      "image": "RtkAudUService64.exe",
+      "pid": 14728
+    },
+    {
+      "image": "chrome.exe",
+      "pid": 14840
+    },
+    {
+      "image": "chrome.exe",
+      "pid": 14860
+    },
+    {
+      "image": "chrome.exe",
+      "pid": 15044
+    },
+    {
+      "image": "chrome.exe",
+      "pid": 15060
+    },
+    {
+      "image": "chrome.exe",
+      "pid": 15164
+    },
+    {
+      "image": "Kiro.exe",
+      "pid": 15436
+    },
+    {
+      "image": "RuntimeBroker.exe",
+      "pid": 15496
+    },
+    {
+      "image": "msedgewebview2.exe",
+      "pid": 15652
+    },
+    {
+      "image": "msedgewebview2.exe",
+      "pid": 15688
+    },
+    {
+      "image": "Kiro.exe",
+      "pid": 15828
+    },
+    {
+      "image": "SystemSettings.exe",
+      "pid": 15900
+    },
+    {
+      "image": "msedgewebview2.exe",
+      "pid": 15948
+    },
+    {
+      "image": "msedgewebview2.exe",
+      "pid": 15956
+    },
+    {
+      "image": "msedgewebview2.exe",
+      "pid": 16016
+    },
+    {
+      "image": "msedgewebview2.exe",
+      "pid": 16208
+    },
+    {
+      "image": "Kiro.exe",
+      "pid": 16556
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 16640
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 16740
+    },
+    {
+      "image": "AppActions.exe",
+      "pid": 16796
+    },
+    {
+      "image": "Kiro.exe",
+      "pid": 16816
+    },
+    {
+      "image": "Kiro.exe",
+      "pid": 16908
+    },
+    {
+      "image": "msedge.exe",
+      "pid": 16928
+    },
+    {
+      "image": "python.exe",
+      "pid": 16960
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 16980
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 17204
+    },
+    {
+      "image": "Kiro.exe",
+      "pid": 17648
+    },
+    {
+      "image": "chrome.exe",
+      "pid": 17740
+    },
+    {
+      "image": "RuntimeBroker.exe",
+      "pid": 17984
+    },
+    {
+      "image": "msedge.exe",
+      "pid": 18096
+    },
+    {
+      "image": "svchost.exe",
+      "pid": 18188
+    },
+    {
+      "image": "msedge.exe",
+      "pid": 18308
+    }
+  ],
+  "process_tree_policy": "CREATE_NEW_PROCESS_GROUP plus taskkill /T /F on timeout",
+  "record_type": "sandbox-attestation",
+  "resolved_paths": [
+    "C:\\Users\\abhin\\OneDrive\\Desktop\\Soulene AI-Rag\\New folder\\Soulene_Rag_Implementation\\.kiro\\specs\\complete-codebase-audit-future-risk-analysis\\findings\\audit-20260827T102557885287Z-073047a3\\sandbox\\source",
+    "C:\\Users\\abhin\\OneDrive\\Desktop\\Soulene AI-Rag\\New folder\\Soulene_Rag_Implementation\\.kiro\\specs\\complete-codebase-audit-future-risk-analysis\\findings\\audit-20260827T102557885287Z-073047a3\\sandbox\\home",
+    "C:\\Users\\abhin\\OneDrive\\Desktop\\Soulene AI-Rag\\New folder\\Soulene_Rag_Implementation\\.kiro\\specs\\complete-codebase-audit-future-risk-analysis\\findings\\audit-20260827T102557885287Z-073047a3\\sandbox\\tmp",
+    "C:\\Users\\abhin\\OneDrive\\Desktop\\Soulene AI-Rag\\New folder\\Soulene_Rag_Implementation\\.kiro\\specs\\complete-codebase-audit-future-risk-analysis\\findings\\audit-20260827T102557885287Z-073047a3\\sandbox\\runtime-cache",
+    "C:\\Users\\abhin\\OneDrive\\Desktop\\Soulene AI-Rag\\New folder\\Soulene_Rag_Implementation\\.kiro\\specs\\complete-codebase-audit-future-risk-analysis\\findings\\audit-20260827T102557885287Z-073047a3\\sandbox\\source\\data",
+    "C:\\Users\\abhin\\OneDrive\\Desktop\\Soulene AI-Rag\\New folder\\Soulene_Rag_Implementation\\.kiro\\specs\\complete-codebase-audit-future-risk-analysis\\findings\\audit-20260827T102557885287Z-073047a3\\sandbox\\source\\knowledge"
+  ],
+  "resource_bounds": {
+    "pytest_batch_command_chars": 5500,
+    "server_mode": false,
+    "watch_mode": false
+  },
+  "run_id": "audit-20260827T102557885287Z-073047a3",
+  "sandbox_root": "C:\\Users\\abhin\\OneDrive\\Desktop\\Soulene AI-Rag\\New folder\\Soulene_Rag_Implementation\\.kiro\\specs\\complete-codebase-audit-future-risk-analysis\\findings\\audit-20260827T102557885287Z-073047a3\\sandbox",
+  "schema_version": "1.0",
+  "timeout_ms": 180000
+}

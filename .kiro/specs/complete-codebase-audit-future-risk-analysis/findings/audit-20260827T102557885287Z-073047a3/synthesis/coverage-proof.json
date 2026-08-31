@@ -1,0 +1,111 @@
+{
+  "baseline_count": 470,
+  "canonical_unique_count": 470,
+  "disposition_counts": {
+    "content-reviewed": 89,
+    "metadata-reviewed": 375,
+    "structure-reviewed": 6
+  },
+  "entrypoint_count": 13,
+  "findings": {
+    "range": "ISSUE-001..ISSUE-040",
+    "total": 40,
+    "unique_ids": 40
+  },
+  "inventory_count": 470,
+  "limitations": [
+    "No live model, staging HTTP endpoint, package registry, advisory service, or Mongo replica set was contacted.",
+    "External provider behavior, retention, regional controls, production TLS/WAF/headers, backups, monitoring, and Mongo deployment semantics require external validation.",
+    "The 42 timed-out hardening tests have no native per-test result; they remain environment failures, not assumed product failures or passes.",
+    "Property 5 was interrupted once with ^C and exit code 1 without summary/counterexample and was not rerun.",
+    "Property 4's exact-case validator failure remains unresolved and forces fail-closed readiness.",
+    "Metadata/structure review intentionally did not reproduce live secrets, user records, or database contents."
+  ],
+  "one_primary_owner_per_file": true,
+  "owner_counts": {
+    "application-flow": 20,
+    "deployment-operations": 21,
+    "memory-rag-cag": 25,
+    "persistence": 16,
+    "safety": 14,
+    "security-privacy": 313,
+    "testing-quality": 61
+  },
+  "property_status": {
+    "Property 4": {
+      "failure": "exact-case validator accepts alternate-case root deliverable paths because canonicalization case-folds before exact allowlist comparison.",
+      "rerun_performed": false,
+      "status": "failed-unresolved"
+    },
+    "Property 5": {
+      "counterexample": null,
+      "exit_code": 1,
+      "output": "^C",
+      "rerun_performed": false,
+      "status": "failed-interrupted",
+      "summary_available": false
+    },
+    "Property 8": "passed"
+  },
+  "record_type": "coverage-proof",
+  "run_id": "audit-20260827T102557885287Z-073047a3",
+  "schema_version": "1.0",
+  "subsystem_coverage": {
+    "artifacts": {
+      "application-flow.jsonl": 5,
+      "deployment-operations.jsonl": 7,
+      "memory-rag-cag.jsonl": 5,
+      "persistence.jsonl": 5,
+      "safety.jsonl": 6,
+      "security-privacy.jsonl": 7,
+      "testing-quality.jsonl": 5
+    },
+    "completed": 7,
+    "expected": 7,
+    "scenario_count": 20,
+    "scenario_matrix_complete": true
+  },
+  "tests": {
+    "actual_test_case_total": 298,
+    "catalog_total": 411,
+    "eligible_total": 295,
+    "executed_total": 295,
+    "ineligible_total": 116,
+    "native_status_counts": {
+      "error": 42,
+      "failed": 6,
+      "not-run": 116,
+      "passed": 247
+    },
+    "network_probe_passed": true,
+    "path_containment_ok": true,
+    "protected_integrity_ok": true,
+    "result_class_counts": {
+      "environment-failure": 42,
+      "inconclusive": 4,
+      "pass": 243,
+      "product-failure": 6,
+      "skipped-ineligible": 116
+    }
+  },
+  "trace_edge_count": 16,
+  "trace_variant_count": 5,
+  "unresolved_architecture_paths": [
+    {
+      "missing_evidence": "No runtime environment, proxy, TLS, WAF, backup, restore, monitoring, or alerting configuration beyond render.yaml.",
+      "path": "production platform/network"
+    },
+    {
+      "missing_evidence": "No live provider calls permitted; semantic classification and generated-response behavior require staged external validation.",
+      "path": "external model behavior"
+    },
+    {
+      "missing_evidence": "No live replica set or backup/retention policy evidence; real integration suite is opt-in and networking-dependent.",
+      "path": "Mongo deployment"
+    },
+    {
+      "missing_evidence": "No application hook closes the shared MongoClient or SQLite feedback connection.",
+      "path": "shutdown lifecycle"
+    }
+  ]
+}

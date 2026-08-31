@@ -23,6 +23,7 @@ from app.types import Turn
 class ConversationState:
     turns: Deque[Turn] = field(default_factory=deque)
     summary: str = ""
+    summary_source: str = "deterministic"
     counters: Dict[str, int] = field(default_factory=dict)
     safety_state: Dict[str, object] = field(default_factory=dict)
     dropped: int = 0
@@ -76,13 +77,21 @@ class ContextCache:
             st.appended_total += 1
 
     def prime(self, conversation_id: str, turns: List[Turn]) -> None:
-        """Warm the cache from the archive (e.g. after a restart)."""
+        """Warm an empty cache from the archive."""
         with self._lock:
             st = self._state(conversation_id)
             if st.turns:
                 return
             for t in turns[-self.cache_size:]:
                 st.turns.append(t)
+                st.appended_total += 1
+
+    def replace_turns(self, conversation_id: str, turns: List[Turn]) -> None:
+        """Refresh the transcript working set from permanent storage."""
+        with self._lock:
+            st = self._state(conversation_id)
+            st.turns = deque(turns[-self.cache_size:], maxlen=self.cache_size)
+            st.appended_total = max(st.appended_total, len(turns))
 
     def recent(self, conversation_id: str, limit: Optional[int] = None) -> List[Turn]:
         with self._lock:
@@ -112,10 +121,18 @@ class ContextCache:
         with self._lock:
             return self._state(conversation_id).summary
 
-    def set_summary(self, conversation_id: str, summary: str) -> None:
+    def summary_source(self, conversation_id: str) -> str:
+        with self._lock:
+            return self._state(conversation_id).summary_source
+
+    def set_summary(self, conversation_id: str, summary: str,
+                    source: str = "deterministic") -> None:
         with self._lock:
             st = self._state(conversation_id)
             st.summary = (summary or "").strip()
+            # Provenance makes it possible to tell reused model-derived context
+            # apart from an excerpt of the user's own words.
+            st.summary_source = source
             # Mark the point at which the summary reflects the transcript, so it
             # is not regenerated again until enough new turns have overflowed.
             st.summarized_at = st.appended_total
@@ -123,6 +140,37 @@ class ContextCache:
     def safety_state(self, conversation_id: str) -> Dict[str, object]:
         with self._lock:
             return dict(self._state(conversation_id).safety_state)
+
+    def derived_snapshot(self, conversation_id: str) -> Dict[str, object]:
+        """Capture derived state so an uncommitted turn can be rolled back."""
+        with self._lock:
+            st = self._state(conversation_id)
+            return {"summary": st.summary, "counters": dict(st.counters),
+                    "safety_state": dict(st.safety_state),
+                    "summarized_at": st.summarized_at}
+
+    def restore_derived(self, conversation_id: str,
+                        snapshot: Dict[str, object]) -> None:
+        """Restore a snapshot taken before a turn began."""
+        with self._lock:
+            st = self._state(conversation_id)
+            st.summary = str(snapshot.get("summary", ""))
+            st.counters = dict(snapshot.get("counters") or {})
+            st.safety_state = dict(snapshot.get("safety_state") or {})
+            st.summarized_at = int(snapshot.get("summarized_at") or 0)
+
+    def reset_derived(self, conversation_id: str) -> None:
+        """Drop derived state when storage holds none for this conversation.
+
+        Rehydration must not leave process-local risk/counters/summary from a
+        turn that never committed; the archive is the only source of truth.
+        """
+        with self._lock:
+            st = self._state(conversation_id)
+            st.summary = ""
+            st.counters = {}
+            st.safety_state = {}
+            st.summarized_at = 0
 
     def set_safety_state(self, conversation_id: str, state: Dict[str, object]) -> None:
         with self._lock:
@@ -178,9 +226,8 @@ class ContextCache:
             return
         with self._lock:
             st = self._state(conversation_id)
-            if not st.counters:  # Only restore if not already populated
-                st.counters = {k: int(v) for k, v in counters.items()
-                               if isinstance(v, (int, float))}
+            st.counters = {k: int(v) for k, v in counters.items()
+                           if isinstance(v, (int, float))}
 
     # ------------------------------------------------------------------
     # Cross-session cache (per user, TTL-bounded)
@@ -209,6 +256,15 @@ class ContextCache:
     def clear(self, conversation_id: str) -> None:
         with self._lock:
             self._conversations.pop(conversation_id, None)
+
+    def clear_user(self, user_id: str) -> None:
+        """Remove every transcript and cross-session derivative for one owner."""
+        prefix = f"{len(user_id)}:{user_id}"
+        with self._lock:
+            for key in [key for key in self._conversations
+                        if key == user_id or key.startswith(prefix)]:
+                self._conversations.pop(key, None)
+            self._cross.pop(prefix, None)
 
     def stats(self) -> dict:
         with self._lock:

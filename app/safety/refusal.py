@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import random
+
 from app.types import Language
 
 
@@ -11,7 +13,36 @@ class RefusalHandler:
             return self._programming(language, distress)
         if reason == "sexual":
             return self._sexual(language)
+        if reason == "injection":
+            return self._injection(language)
         return self._harmful(language)
+
+    # Injection is answered deterministically and without a model call, so no
+    # stored conversation, memory or knowledge can be steered by the attempt.
+    _INJECTION_EN = (
+        "I can't share or change how I work internally. I'm here for your wellbeing "
+        "though — what's actually going on for you?",
+        "That's not something I can go into. But if something's weighing on you, "
+        "I'd rather hear about that.",
+        "I'll keep my setup private. Tell me how you've been doing instead?",
+    )
+    _INJECTION_HI = (
+        "मैं अपने internal setup के बारे में बात नहीं कर सकता। पर आप कैसा महसूस कर रहे हैं, "
+        "वो सुनना चाहूँगा।",
+        "यह मैं share नहीं कर सकता। अगर कुछ परेशान कर रहा है, तो बताइए।",
+    )
+    _INJECTION_HINGLISH = (
+        "Main apne internal setup ke baare mein baat nahi kar sakta. Par batao, "
+        "tumhare mind mein kya chal raha hai?",
+        "Yeh main share nahi kar sakta. Agar kuch pareshan kar raha hai to bolo.",
+    )
+
+    def _injection(self, language: Language) -> str:
+        if language == Language.HINDI:
+            return random.choice(self._INJECTION_HI)
+        if language == Language.HINGLISH:
+            return random.choice(self._INJECTION_HINGLISH)
+        return random.choice(self._INJECTION_EN)
 
     def _programming(self, language: Language, distress: bool) -> str:
         if language == Language.HINDI:

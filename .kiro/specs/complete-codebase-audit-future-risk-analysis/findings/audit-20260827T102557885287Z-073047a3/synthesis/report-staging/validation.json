@@ -1,0 +1,26 @@
+{
+  "all_domains_reviewed": true,
+  "issue_count": 40,
+  "one_to_one_mapping": true,
+  "outcome": "pass",
+  "property_9_test_defect_disclosed": true,
+  "record_type": "report-staging-validation",
+  "redaction_scan_passed": true,
+  "release_blockers_consistent": true,
+  "reviewed_empty_domains": [
+    "maintainability"
+  ],
+  "root_writes": 0,
+  "run_id": "audit-20260827T102557885287Z-073047a3",
+  "schema_version": "1.0",
+  "solution_count": 40,
+  "specialized_fields_complete": true,
+  "summary_counts_match": true,
+  "temporal_partition_counts": {
+    "current-and-future": 19,
+    "current-defect": 9,
+    "future-risk": 12
+  },
+  "unique_issue_ids": true,
+  "unique_solution_ids": true
+}

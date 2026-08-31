@@ -1,0 +1,13 @@
+{
+  "baseline_count": 470,
+  "captured_utc": "2026-08-27T11:04:31.426674+00:00",
+  "checked_count": 470,
+  "integrity_ok": true,
+  "mismatch_count": 0,
+  "mismatches": [],
+  "phase": "after-test-execution",
+  "record_type": "protected-tree-snapshot",
+  "run_id": "audit-20260827T102557885287Z-073047a3",
+  "schema_version": "1.0",
+  "sensitive_content_persisted": false
+}

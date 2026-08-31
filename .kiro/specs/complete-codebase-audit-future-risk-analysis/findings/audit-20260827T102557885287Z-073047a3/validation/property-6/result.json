@@ -1,0 +1,12 @@
+{
+  "counterexample": null,
+  "examples": 240,
+  "exit_code": 0,
+  "framework": "pytest deterministic generated-input property harness (Hypothesis unavailable; no network installation permitted)",
+  "output_summary": "1 passed in 0.05s",
+  "property": "Property 6: Issue and solution references are bidirectionally valid",
+  "run_id": "audit-20260827T102557885287Z-073047a3",
+  "schema_version": "1.0",
+  "status": "passed",
+  "task": "9.2 Write the property test for issue/remediation references"
+}

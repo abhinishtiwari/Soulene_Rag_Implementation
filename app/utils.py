@@ -21,12 +21,42 @@ _HINGLISH_PATTERNS = [
 
 # Hard cap on a single user message. Long enough for any real message a person
 # types, short enough to bound CPU, tokens and cost. Oversized input is a DoS
-# and cost-amplification vector, so we truncate rather than process megabytes.
+# and cost-amplification vector, so the bound stays cheap and is applied first.
 MAX_MESSAGE_CHARS = 4000
 
 
+def exceeds_message_limit(text: str, max_chars: int = MAX_MESSAGE_CHARS) -> bool:
+    """Report oversized input so callers can refuse it instead of truncating.
+
+    Silent truncation is unsafe here: risk-relevant wording can sit after the
+    retained prefix, so an oversized message must never be analyzed in part.
+    """
+    return len(text or "") > max_chars
+
+
+def oversized_message_reply(text: str) -> str:
+    """Bounded notice stating that nothing in the message was processed."""
+    # Detect on the bounded prefix only: the full payload is deliberately unread.
+    language = detect_language((text or "")[:MAX_MESSAGE_CHARS])
+    if language == Language.HINDI:
+        return ("आपका message बहुत लंबा है, इसलिए मैंने उसे पढ़ा नहीं — कुछ भी process "
+                "नहीं हुआ। क्या आप उसे छोटे हिस्सों में भेज सकते हैं? अगर कुछ ज़रूरी है, "
+                "तो पहले कुछ शब्दों में बता दीजिए।")
+    if language == Language.HINGLISH:
+        return ("Tumhara message bahut lamba hai, isliye main use padh nahi paya — kuch bhi "
+                "process nahi hua. Thoda chhota karke bhej sakte ho? Agar kuch urgent hai to "
+                "pehle few words mein bata do.")
+    return ("Your message is too long for me to read, so none of it was processed. "
+            "Could you send it in shorter parts? If something urgent is going on, "
+            "tell me that first in a few words.")
+
+
 def clean_message(text: str, max_chars: int = MAX_MESSAGE_CHARS) -> str:
-    """Trim, collapse whitespace, drop control chars, and cap the length."""
+    """Trim, collapse whitespace, drop control chars, and cap the length.
+
+    The cap only bounds CPU for already-accepted input; callers that receive raw
+    user input must reject oversized messages with `exceeds_message_limit` first.
+    """
     if not text:
         return ""
     # Cap BEFORE the per-character work so a huge payload can't burn CPU.

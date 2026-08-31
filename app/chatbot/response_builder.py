@@ -9,6 +9,7 @@ from typing import Optional
 
 from app.config.settings import Settings
 from app.llm.client import LLMClient
+from app.observability import COUNTERS
 from app.prompts.system_prompt import (
     OUTPUT_REVIEW_SYSTEM_PROMPT,
     build_output_review_input,
@@ -248,13 +249,172 @@ class ResponseBuilder:
                 "been going on — I'd rather understand what you're carrying and figure out "
                 "what actually helps.")
 
+    # High-impact therapeutic harms need a local policy wall. The model reviewer
+    # is useful defense in depth, but network or parsing failures must not be the
+    # only thing standing between these statements and a vulnerable user.
+    _THERAPEUTIC_HARM_PATTERNS = (
+        # Relational-boundary harms. Ordinary warmth ("I'm here for you", "you're
+        # not alone") is deliberately NOT matched; only exclusivity, replacement
+        # of real care, coercion, false permanence and special-bond framing are.
+        ("dependency_or_coercion", re.compile(
+            r"\b(?:i(?:'m| am) (?:all|the only (?:one|person)) you need"
+            r"|only (?:trust|listen to|talk to) me"
+            r"|don'?t tell (?:anyone|your (?:doctor|therapist|family|friends))"
+            r"|stop (?:seeing|talking to) your (?:doctor|therapist|family|friends)"
+            r"|you don'?t need (?:a |your )?(?:doctor|therapist|family|friends|anyone else)"
+            # exclusivity / isolation from other support
+            r"|(?:never|don'?t|do not) need to (?:talk|speak) to any ?one else"
+            r"|no one else (?:needs to know|has to know)"
+            r"|(?:i'?m|i am) the only (?:one|person) who (?:understands|cares about|gets) you"
+            r"|you don'?t need any ?one (?:else|but me)"
+            # replacement of professional care
+            r"|you (?:do not|don'?t) need (?:therapy|a therapist|counsell?ing"
+            r"|professional help|medication|a doctor)"
+            r"|therapy (?:is ?n'?t|is not) (?:necessary|needed)"
+            # claiming superiority over the user's real relationships
+            r"|(?:understand|know) you better than (?:your|any ?one)"
+            # coercive commitments
+            r"|promise me you (?:will|won'?t|wont)"
+            r"|message me first before"
+            # false permanence / total reliance
+            r"|rely on me completely|depend on me (?:completely|entirely)"
+            r"|i (?:will|'ll) never leave you"
+            # special-bond framing
+            r"|our (?:bond|connection|relationship) is (?:special|unique|different)"
+            r"|different from your other relationships)\b",
+            re.I,
+        )),
+        ("diagnosis", re.compile(
+            r"\b(?:you (?:definitely|clearly|certainly|obviously|undoubtedly) "
+            r"(?:have|suffer from)|i (?:can|will) diagnose you"
+            r"|i(?:'ve| have) diagnosed you|your diagnosis is"
+            r"|you (?:are|must be) (?:bipolar|psychotic|schizophrenic|clinically depressed))\b",
+            re.I,
+        )),
+        ("delusion_reinforcement", re.compile(
+            r"\b(?:i know (?:the )?voices are real"
+            r"|the voices are (?:definitely |actually )?real"
+            r"|(?:they|the government|your neighbors?) (?:are|is) "
+            r"(?:watching|following|tracking) you"
+            r"|secret messages? (?:are|is) (?:being )?sent (?:just )?to you"
+            r"|your (?:paranoia|suspicion|belief) is (?:true|correct))\b",
+            re.I,
+        )),
+        ("medical_instruction", re.compile(
+            r"\b(?:take|start|stop|quit|increase|decrease|double|halve|skip|switch|change)\b"
+            r".{0,80}\b(?:dose|dosage|medication|medicine|prescription|antidepressant"
+            r"|antipsychotic|sedative|tablet|pill)s?\b",
+            re.I | re.S,
+        )),
+        ("treatment_certainty", re.compile(
+            r"\b(?:this (?:will|is guaranteed to) (?:cure|fix) (?:your )?"
+            r"(?:depression|anxiety|trauma|panic attacks?|mental illness)"
+            r"|you (?:will|are guaranteed to) recover if you follow my advice)\b",
+            re.I,
+        )),
+        ("shame_or_degradation", re.compile(
+            r"\b(?:you(?:'re| are) (?:weak|pathetic|crazy|broken|attention[- ]seeking)"
+            r"|this is (?:all |entirely )?your fault"
+            r"|you deserve to (?:feel this way|suffer))\b",
+            re.I,
+        )),
+    )
+    _SAFE_MEDICAL_BOUNDARY = re.compile(
+        r"\b(?:do not|don'?t|should not|shouldn'?t|never|can'?t|cannot)\s+"
+        r"(?:take|start|stop|quit|increase|decrease|double|halve|skip|switch|change)\b",
+        re.I,
+    )
+    _SAFE_SHAME_BOUNDARY = re.compile(
+        r"\byou(?:'re| are) not (?:weak|pathetic|crazy|broken|attention[- ]seeking)\b",
+        re.I,
+    )
+    _SAFE_REALITY_BOUNDARY = re.compile(
+        r"\b(?:may |can )?(?:feel|seem) like (?:the )?voices are real\b",
+        re.I,
+    )
+
+    def _therapeutic_harm_category(self, reply: str) -> str | None:
+        text = self._SAFE_MEDICAL_BOUNDARY.sub("", reply or "")
+        text = self._SAFE_SHAME_BOUNDARY.sub("", text)
+        text = self._SAFE_REALITY_BOUNDARY.sub("", text)
+        for category, pattern in self._THERAPEUTIC_HARM_PATTERNS:
+            if pattern.search(text):
+                return category
+        return None
+
+    @staticmethod
+    def _therapeutic_safety_reply(language: Language) -> str:
+        if language == Language.HINDI:
+            return (
+                "मैं diagnosis, medicine की dose, या human support को replace करने वाली "
+                "सलाह सुरक्षित रूप से नहीं दे सकता। किसी qualified healthcare professional "
+                "से बात करना बेहतर होगा; मैं आपकी बात सुनने और अगला सुरक्षित कदम सोचने में साथ हूँ।"
+            )
+        if language == Language.HINGLISH:
+            return (
+                "Main diagnosis, medicine ki dose, ya human support ko replace karne wali "
+                "advice safely nahi de sakta. Qualified healthcare professional se baat karna "
+                "better hoga; main sunne aur next safe step sochne mein saath hoon."
+            )
+        return (
+            "I can't safely give a diagnosis, medication dose, or advice that replaces human "
+            "support. A qualified healthcare professional can help with diagnosis or treatment; "
+            "I can listen and help you think through a safe next step."
+        )
+
+    # Gentle, non-rejecting nudge back toward human and professional support.
+    # Deliberately warm: the goal is to widen the user's support, not to withdraw.
+    _RELATIONAL_BOUNDARY = {
+        Language.ENGLISH: (
+            "I'm glad this helps, and I do want to say one thing gently: I'm not a "
+            "substitute for people who can be there in person. Is there someone you "
+            "trust, or a professional, you could let in a little too?"
+        ),
+        Language.HINGLISH: (
+            "Mujhe accha lagta hai ki yeh help karta hai, par ek baat gently kehna "
+            "chahta hoon: main un logon ki jagah nahi le sakta jo tumhare saath "
+            "physically ho sakte hain. Koi trusted insaan ya professional bhi saath "
+            "ho to accha rahega."
+        ),
+        Language.HINDI: (
+            "मुझे अच्छा लगता है कि इससे मदद मिलती है, पर एक बात धीरे से कहना चाहता हूँ: "
+            "मैं उन लोगों की जगह नहीं ले सकता जो आपके साथ सामने हो सकते हैं। किसी "
+            "भरोसेमंद व्यक्ति या professional को भी साथ रखिए।"
+        ),
+    }
+
+    def append_relational_boundary(self, reply: str, language: Language) -> str:
+        """Add a one-off boundary reminder to an otherwise unchanged reply."""
+        note = self._RELATIONAL_BOUNDARY.get(
+            language, self._RELATIONAL_BOUNDARY[Language.ENGLISH])
+        if not reply:
+            return note
+        if note in reply:
+            return reply
+        return f"{reply.rstrip()} {note}"
+
+    def contains_unsafe_derived_text(self, text: str) -> bool:
+        """Screen model-generated derived context (summaries, notes) for reuse.
+
+        Derived text is never shown directly, but it is fed back into later
+        prompts, so it must clear the same leak/secret/therapeutic-harm walls as
+        a user-visible reply before it can be stored.
+        """
+        candidate = text or ""
+        if not candidate.strip():
+            return True
+        if self._LEAK.search(candidate) or self._SECRET.search(candidate):
+            return True
+        return self._therapeutic_harm_category(candidate) is not None
+
     def apply_output_safety(self, *, session_id: str, user_message: str, reply: str,
                             language: Language,
                             risk_assessment: Optional[RiskAssessment] = None) -> str:
         """Validate the exact text that will be delivered and archived."""
         reply = self.scrub_leak(reply, language)
 
-        # Optional style/policy editor runs before the mandatory final checks.
+        # The editor improves recoverable drafts. Its result still passes every
+        # deterministic and semantic check below.
         if self.settings.enable_output_safety_check and self.client is not None:
             try:
                 edited = self.client.generate(
@@ -282,6 +442,11 @@ class ResponseBuilder:
         if category == "harmful":
             return self.refusal.respond("harmful", language)
 
+        harm = self._therapeutic_harm_category(reply)
+        if harm is not None:
+            COUNTERS.increment(f"output_blocked_{harm}")
+            return self._therapeutic_safety_reply(language)
+
         semantic_category = self._semantic_output_category(
             session_id, user_message, reply)
         if semantic_category == "self_harm_encouragement":
@@ -297,6 +462,12 @@ class ResponseBuilder:
                 safety_level=level, assessment=risk_assessment)
         if semantic_category in {"harm_encouragement", "medical_instruction"}:
             return self.refusal.respond("harmful", language)
+        if semantic_category in {
+            "diagnosis", "delusion_reinforcement", "dependency_or_coercion",
+            "treatment_certainty", "shame_or_degradation", "review_unavailable",
+        }:
+            COUNTERS.increment(f"output_blocked_{semantic_category}")
+            return self._therapeutic_safety_reply(language)
         if semantic_category == "prompt_leak":
             return self.scrub_leak("My system prompt and internal rules", language)
         return reply
@@ -304,18 +475,25 @@ class ResponseBuilder:
     def _semantic_output_category(self, session_id: str, user_message: str,
                                   reply: str) -> str:
         if not self.settings.enable_semantic_safety or self.client is None:
-            return "safe"
+            return "not_required"
         assess = getattr(self.client, "assess_output", None)
         if not callable(assess):
-            return "safe"
+            return "review_unavailable"
+        allowed = {
+            "safe", "self_harm_encouragement", "harm_encouragement",
+            "danger_minimization", "medical_instruction", "prompt_leak",
+            "diagnosis", "delusion_reinforcement", "dependency_or_coercion",
+            "treatment_certainty", "shame_or_degradation",
+        }
         try:
             value = assess(user_message=user_message, reply=reply,
                            session_id=session_id)
             if isinstance(value, dict):
-                return str(value.get("category", "safe"))
-            match = re.search(r"\{.*\}", str(value or ""), re.S)
-            if match:
-                return str(json.loads(match.group(0)).get("category", "safe"))
+                category = str(value.get("category", "")).strip().lower()
+            else:
+                match = re.search(r"\{.*\}", str(value or ""), re.S)
+                category = str(json.loads(match.group(0)).get("category", "")).strip().lower() \
+                    if match else ""
+            return category if category in allowed else "review_unavailable"
         except Exception:
-            pass
-        return "safe"
+            return "review_unavailable"

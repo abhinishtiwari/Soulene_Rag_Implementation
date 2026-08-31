@@ -4,7 +4,9 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Soulene AI</title>
-  <style>
+  <style nonce="{{ csp_nonce }}">
+    .privacy-notice { margin:0; padding:6px 16px 12px; font-size:11px; line-height:1.5;
+      color:var(--muted); text-align:center; }
     :root { --bg:#eef2ff; --panel:#fff; --user-color:#6366f1; --user-text:#fff; --bot:#f1f3f9; --bot-text:#1f2430; --muted:#7a8194; --border:#e3e7f0; --accent:#6366f1; --accent-hover:#4f46e5; --sidebar-bg:#f8f9fd; }
     *{box-sizing:border-box;margin:0;padding:0}html,body{height:100%}
     body{font-family:"Segoe UI",system-ui,sans-serif;color:var(--bot-text);background:linear-gradient(160deg,var(--bg) 0%,#f7f9fc 60%)}
@@ -56,31 +58,16 @@
   </style>
 </head>
 <body>
-  <!-- USER SELECTION -->
-  <div id="userSelectScreen" class="user-select-screen">
-    <div class="user-select-card">
-      <div class="logo-big">💜</div>
-      <h1>Soulene AI</h1>
-      <p>Choose your profile to continue</p>
-      <div class="user-buttons">
-        <button class="user-btn" onclick="selectUser('abhinish','Abhinish')"><div class="avatar">A</div><span>Abhinish</span></button>
-        <button class="user-btn" onclick="selectUser('chirag','Chirag')"><div class="avatar">C</div><span>Chirag</span></button>
-        <button class="user-btn" onclick="selectUser('joy','Joy')"><div class="avatar">J</div><span>Joy</span></button>
-      </div>
-    </div>
-  </div>
-
-  <!-- CHAT APP -->
-  <div id="chatApp" class="chat-app">
+  <!-- Identity is assigned by the server in a signed HttpOnly cookie. -->
+  <div id="chatApp" class="chat-app active">
     <aside class="sidebar">
       <div class="sidebar-header">
         <div class="user-info">
-          <div class="user-avatar" id="sidebarAvatar">A</div>
-          <span class="user-name" id="sidebarName">Abhinish</span>
+          <div class="user-avatar" id="sidebarAvatar">S</div>
+          <span class="user-name" id="sidebarName">Private profile</span>
         </div>
-        <button class="btn-switch" onclick="switchUser()">Switch</button>
       </div>
-      <button class="btn-new" onclick="createNewChat()">+ New Chat</button>
+      <button class="btn-new" id="newChatBtn" type="button">+ New Chat</button>
       <div class="session-list" id="sessionList"></div>
     </aside>
     <div class="chat-panel">
@@ -93,45 +80,43 @@
         <input id="chatInput" type="text" placeholder="Share what's on your mind..." required />
         <button id="sendBtn" type="submit">Send</button>
       </form>
+      <!-- ISSUE-028: users are told that messages are processed by an external
+           AI provider, and that Soulene is not a substitute for professional care. -->
+      <p class="privacy-notice" id="privacyNotice">
+        Your messages are processed by an external AI provider to generate replies.
+        Soulene is not a crisis service or a substitute for professional care.
+      </p>
     </div>
   </div>
 
-  <script>
-    let activeUserId=null, activeUserName=null, activeSessionId=null, sessions=[];
+  <script nonce="{{ csp_nonce }}">
+    let activeUserId=null, activeUserName='there', activeSessionId=null, sessions=[];
     const messagesEl=document.getElementById('messages');
     const chatForm=document.getElementById('chatForm');
     const chatInput=document.getElementById('chatInput');
     const sendBtn=document.getElementById('sendBtn');
     const sessionList=document.getElementById('sessionList');
 
-    function selectUser(id,name){
-      activeUserId=id; activeUserName=name;
-      document.getElementById('sidebarAvatar').textContent=name[0];
-      document.getElementById('sidebarName').textContent=name;
-      document.getElementById('userSelectScreen').style.display='none';
-      document.getElementById('chatApp').classList.add('active');
-      loadSessions();
-    }
-    function switchUser(){
-      activeUserId=null;activeUserName=null;activeSessionId=null;sessions=[];
-      messagesEl.innerHTML='';sessionList.innerHTML='';
-      document.getElementById('chatApp').classList.remove('active');
-      document.getElementById('userSelectScreen').style.display='grid';
+    async function initialize(){
+      try{
+        const r=await fetch('/identity');
+        if(!r.ok)throw new Error('identity unavailable');
+        const d=await r.json();
+        activeUserId=d.user_id;activeSessionId=d.session_id;
+        await loadSessions();
+      }catch(e){showWelcome();}
     }
 
     async function loadSessions(){
       try{
-        const r=await fetch(`/sessions?user_id=${activeUserId}`);
+        const r=await fetch('/sessions');
         const d=await r.json();
         sessions=d.sessions||[];
         renderSessionList();
         if(sessions.length>0) loadSession(sessions[0].session_id);
         else await createNewChat();
-      }catch(e){
-        activeSessionId=activeUserId+'-'+Date.now();
-        showWelcome();
-      }
-      if(!activeSessionId){activeSessionId=activeUserId+'-'+Date.now();showWelcome();}
+      }catch(e){showWelcome();}
+      if(!activeSessionId)showWelcome();
     }
 
     function renderSessionList(){
@@ -149,7 +134,7 @@
 
     async function createNewChat(){
       try{
-        const r=await fetch('/sessions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user_id:activeUserId})});
+        const r=await fetch('/sessions',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
         const d=await r.json();
         if(d.session&&d.session.session_id){sessions.unshift(d.session);activeSessionId=d.session.session_id;renderSessionList();messagesEl.innerHTML='';showWelcome();return;}
       }catch(e){}
@@ -159,7 +144,7 @@
     async function loadSession(sid){
       activeSessionId=sid;renderSessionList();messagesEl.innerHTML='';
       try{
-        const r=await fetch(`/sessions/${sid}?user_id=${activeUserId}`);
+        const r=await fetch(`/sessions/${encodeURIComponent(sid)}`);
         const d=await r.json();
         if(d.messages&&d.messages.length>0) d.messages.forEach(m=>addMsg(m.content,m.role==='user'?'user':'bot'));
         else showWelcome();
@@ -179,6 +164,10 @@
       messagesEl.appendChild(row);messagesEl.scrollTop=messagesEl.scrollHeight;return row;
     }
 
+    // Bound here rather than as an inline onclick attribute so the page needs no
+    // 'unsafe-inline' in its Content-Security-Policy.
+    document.getElementById('newChatBtn').addEventListener('click',createNewChat);
+
     chatForm.addEventListener('submit',async e=>{
       e.preventDefault();
       const msg=chatInput.value.trim();
@@ -186,7 +175,8 @@
       addMsg(msg,'user');chatInput.value='';sendBtn.disabled=true;
       const typing=addTyping();
       try{
-        const res=await fetch('/chat/stream',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:msg,session_id:activeSessionId,user_id:activeUserId})});
+        const requestId=(globalThis.crypto&&crypto.randomUUID)?crypto.randomUUID():`${Date.now()}-${Math.random()}`;
+        const res=await fetch('/chat/stream',{method:'POST',headers:{'Content-Type':'application/json','Idempotency-Key':requestId},body:JSON.stringify({message:msg,session_id:activeSessionId})});
         if(!res.ok||!res.body)throw new Error('fail');
         typing.remove();const bubble=addMsg('','bot');
         const reader=res.body.getReader();const dec=new TextDecoder();
@@ -202,6 +192,7 @@
 
     function esc(s){const d=document.createElement('div');d.textContent=s;return d.innerHTML;}
     function formatTime(ts){const d=new Date(ts*1000),n=new Date();if(d.toDateString()===n.toDateString())return d.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});return d.toLocaleDateString([],{month:'short',day:'numeric'});}
+    initialize();
   </script>
 </body>
 </html>

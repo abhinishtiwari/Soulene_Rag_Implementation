@@ -1,0 +1,18 @@
+[
+  {
+    "missing_evidence": "No runtime environment, proxy, TLS, WAF, backup, restore, monitoring, or alerting configuration beyond render.yaml.",
+    "path": "production platform/network"
+  },
+  {
+    "missing_evidence": "No live provider calls permitted; semantic classification and generated-response behavior require staged external validation.",
+    "path": "external model behavior"
+  },
+  {
+    "missing_evidence": "No live replica set or backup/retention policy evidence; real integration suite is opt-in and networking-dependent.",
+    "path": "Mongo deployment"
+  },
+  {
+    "missing_evidence": "No application hook closes the shared MongoClient or SQLite feedback connection.",
+    "path": "shutdown lifecycle"
+  }
+]

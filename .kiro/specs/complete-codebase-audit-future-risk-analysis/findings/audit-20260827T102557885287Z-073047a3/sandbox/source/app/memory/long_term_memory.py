@@ -1,0 +1,315 @@
+"""Long-term, per-user memory — SEPARATE from the raw chat archive.
+
+- Stores at most ~50 useful memories per user (name, stable preferences, ongoing
+  context, confirmed relevant info).
+- Extraction is deterministic and conservative (no LLM); we only keep clearly
+  stable, useful facts, not every message.
+- Retrieval returns 3–8 relevant memories for the current message, or nothing
+  when nothing is relevant. Never dumps all memories into the prompt.
+- Everything is scoped by user_id (isolation).
+"""
+
+from __future__ import annotations
+
+import json
+import re
+import time
+from pathlib import Path
+from threading import Lock
+from typing import Dict, List, Optional
+
+from app.types import UserMemory
+
+_MAX_MEMORIES = 50
+_STOPWORDS = {
+    "the", "and", "for", "with", "that", "this", "from", "have", "about", "what",
+    "when", "your", "you", "are", "was", "were", "im", "me", "my", "to", "of",
+    "in", "is", "it", "a", "an", "i", "feel", "feeling", "today", "just",
+}
+
+# ISS-05 FIX: Domain-specific synonym map for bridging common vocabulary gaps.
+_SYNONYMS: Dict[str, List[str]] = {
+    "career": ["work", "job", "profession", "occupation"],
+    "work": ["career", "job", "profession"],
+    "job": ["work", "career", "profession"],
+    "study": ["exam", "college", "school", "assignment", "university"],
+    "exam": ["study", "test", "assessment"],
+    "college": ["university", "school", "study"],
+    "school": ["college", "university", "study"],
+    "partner": ["girlfriend", "boyfriend", "wife", "husband", "spouse"],
+    "girlfriend": ["partner", "gf"],
+    "boyfriend": ["partner", "bf"],
+    "wife": ["partner", "spouse"],
+    "husband": ["partner", "spouse"],
+    "mom": ["mother", "mum", "mama"],
+    "mother": ["mom", "mum", "mama"],
+    "dad": ["father", "papa"],
+    "father": ["dad", "papa"],
+    "anxious": ["anxiety", "nervous", "worried", "stressed"],
+    "anxiety": ["anxious", "nervous", "worried"],
+    "stressed": ["stress", "overwhelmed", "burned"],
+    "stress": ["stressed", "overwhelmed", "pressure"],
+    "sad": ["depressed", "unhappy", "low", "down"],
+    "depressed": ["sad", "depression", "low"],
+    "lonely": ["alone", "isolated", "loneliness"],
+    "alone": ["lonely", "isolated"],
+    "sleep": ["insomnia", "rest", "awake", "tired"],
+    "tired": ["exhausted", "drained", "fatigue", "sleep"],
+}
+
+# Conservative extraction patterns for STABLE, user-beneficial facts only.
+# Conservative extraction patterns for STABLE, user-beneficial facts only.
+# NOTE: "i am"/"i'm" removed from name detection — too many false positives
+# (e.g. "I'm a student" would incorrectly extract "a student" as a name).
+_NAME = re.compile(r"\b(?:my name is|call me|mera naam|mujhe log bulate hain)\s+([a-z][a-z '\-]{1,30})", re.I)
+_PREF = re.compile(r"\b(i (?:like|love|enjoy|prefer|hate|dislike|can'?t stand)\s+[a-z].{2,40})", re.I)
+_CONTEXT = re.compile(
+    r"\b(i (?:work as|study|am studying|have (?:exams?|an interview|a deadline)|live in|am a)\s+[a-z].{2,50})",
+    re.I,
+)
+_RELATION = re.compile(
+    r"\b((?:my )?(?:mother|father|mom|dad|sister|brother|wife|husband|partner|girlfriend|boyfriend|friend|boss)\b.{0,50})",
+    re.I,
+)
+# --- wellness-specific, high-value memory categories ---
+_TRIGGER = re.compile(
+    r"\b((?:my )?(?:anxiety|stress|panic|overthinking)\s+(?:is )?(?:triggered by|starts when|gets worse when|comes from)\s+[a-z].{2,60}"
+    r"|i (?:get|feel) (?:anxious|stressed|panicky|overwhelmed) (?:when|before|around|during)\s+[a-z].{2,60})",
+    re.I,
+)
+_COPING = re.compile(
+    r"\b((?:deep breathing|journaling|walking|running|music|meditation|yoga|praying|painting|talking to \w+)"
+    r"\s+(?:really )?(?:helps?|helped|works?|worked|calms? me)[a-z ]{0,30}"
+    r"|i feel better (?:when|after) i\s+[a-z].{2,50})",
+    re.I,
+)
+_SLEEP = re.compile(
+    r"\b(i (?:sleep|can'?t sleep|barely sleep|hardly sleep)\s*[a-z0-9].{2,50}"
+    r"|i (?:go to bed|wake up)\s+(?:at|around)\s+[a-z0-9].{1,25}"
+    r"|my sleep (?:is|has been)\s+[a-z].{2,40})",
+    re.I,
+)
+_GOAL = re.compile(
+    r"\b(i want to\s+(?:be|feel|get|start|stop|build|improve|become)\s+[a-z].{2,55}"
+    r"|my goal is\s+[a-z].{2,55}"
+    r"|i'?m (?:trying|working) to\s+[a-z].{2,55})",
+    re.I,
+)
+_ACHIEVEMENT = re.compile(
+    r"\b(i (?:finally|just)\s+(?:did|got|passed|finished|completed|achieved|won|started|managed|submitted|\w+ed)\b.{0,50}"
+    r"|i (?:got|passed|finished|completed|achieved|won)\s+(?:my|the|a|an)\s+[a-z].{2,50})",
+    re.I,
+)
+_STYLE = re.compile(
+    r"\b((?:please )?(?:don'?t|do not) (?:give me advice|tell me what to do|ask too many questions)[a-z ]{0,30}"
+    r"|i (?:just )?(?:want|prefer) (?:to vent|you to listen|short (?:replies|answers)|advice)[a-z ]{0,30})",
+    re.I,
+)
+# Negations that may contradict a stored memory (trigger gentle clarify, not silent reuse).
+_NEGATION = re.compile(r"\b(don'?t|do not|no longer|not anymore|isn'?t|used to but|stopped)\b", re.I)
+
+
+def _tokens(text: str) -> set[str]:
+    return {t for t in re.findall(r"[a-z0-9']+", text.lower()) if len(t) > 2 and t not in _STOPWORDS}
+
+
+class LongTermMemory:
+    def __init__(self, storage_dir: Optional[Path] = None):
+        self._store: Dict[str, List[UserMemory]] = {}
+        self._lock = Lock()
+        self._dir = storage_dir
+        if storage_dir is not None:
+            storage_dir.mkdir(parents=True, exist_ok=True)
+
+    # ------------------------------------------------------------------
+    def observe(
+        self, user_id: str, message: str, *,
+        source_session_id: Optional[str] = None,
+        source_message_id: Optional[str] = None,
+        extraction_version: str = "rules-v1",
+        confidence: float = 1.0,
+    ) -> None:
+        """Extract stable facts and retain committed-message provenance."""
+        candidates: List[UserMemory] = []
+        now = time.time()
+
+        m = _NAME.search(message)
+        if m:
+            # Take the first 1–2 words and drop trailing filler ("by the way", etc.).
+            raw = m.group(1).strip().split()
+            filler = {"by", "the", "way", "and", "but", "so", "just", "actually", "here", "now"}
+            name_parts = []
+            for w in raw[:2]:
+                if w.lower() in filler:
+                    break
+                name_parts.append(w)
+            name = " ".join(name_parts).strip(" '-")
+            if name and name.lower() not in filler:
+                candidates.append(UserMemory(text=f"User's name: {name}", kind="name",
+                                             created_at=now, updated_at=now, weight=2.0))
+        # Higher-weight wellness categories are checked with the general ones.
+        for pat, kind, weight in (
+            (_TRIGGER, "trigger", 2.0),
+            (_COPING, "coping_strategy", 2.0),
+            (_GOAL, "goal", 1.6),
+            (_SLEEP, "sleep", 1.4),
+            (_STYLE, "communication_style", 1.8),
+            (_ACHIEVEMENT, "achievement", 1.2),
+            (_PREF, "preference", 1.0),
+            (_CONTEXT, "context", 1.0),
+            (_RELATION, "relationship", 1.0),
+        ):
+            for match in pat.finditer(message):
+                text = re.sub(r"\s+", " ", match.group(1)).strip()
+                if 4 <= len(text) <= 90:
+                    candidates.append(UserMemory(text=text, kind=kind, created_at=now,
+                                                 updated_at=now, weight=weight))
+        if not candidates:
+            return
+        source = None
+        if source_session_id and source_message_id:
+            source = {"session_id": source_session_id, "message_id": source_message_id}
+        for candidate in candidates:
+            candidate.sources = [source] if source else []
+            candidate.extraction_version = extraction_version
+            candidate.confidence = max(0.0, min(1.0, float(confidence)))
+
+        with self._lock:
+            mem = self._load(user_id)
+            for cand in candidates:
+                self._upsert(mem, cand)
+            # Cap to the most recently updated / highest-weight memories.
+            mem.sort(key=lambda x: (x.weight, x.updated_at), reverse=True)
+            del mem[_MAX_MEMORIES:]
+            self._store[user_id] = mem
+            self._persist(user_id, mem)
+
+    def retrieve(self, user_id: str, message: str, k_min: int = 3, k_max: int = 8) -> List[UserMemory]:
+        with self._lock:
+            mem = list(self._load(user_id))
+        if not mem:
+            return []
+        q = _tokens(message)
+        if not q:
+            # ISS-05 FIX: Even with no tokens, always return name + style memories.
+            always = [m for m in mem if m.kind in ("name", "communication_style")]
+            return always[:k_min] if always else []
+
+        # ISS-05 FIX: Expand query tokens with domain-specific synonyms.
+        expanded_q = set(q)
+        for token in q:
+            if token in _SYNONYMS:
+                expanded_q.update(_SYNONYMS[token])
+
+        scored = []
+        for item in mem:
+            item_tokens = _tokens(item.text)
+            # Score using both original and expanded tokens
+            direct_overlap = len(q & item_tokens)
+            synonym_overlap = len((expanded_q - q) & item_tokens)
+            # Direct matches score full, synonym matches score 0.6
+            overlap = direct_overlap + (synonym_overlap * 0.6)
+
+            # ISS-05 FIX: Always include name and communication_style memories
+            if item.kind in ("name", "communication_style"):
+                score = overlap + 1.0 + 0.1 * item.weight
+            elif overlap > 0:
+                # ISS-05 FIX: Recency boost — recently updated memories rank higher
+                recency_bonus = min(0.3, 0.1 * (item.updated_at / (time.time() or 1)))
+                score = overlap + 0.1 * item.weight + recency_bonus
+            else:
+                continue
+            scored.append((score, item))
+
+        scored.sort(key=lambda x: x[0], reverse=True)
+        selected = [item for s, item in scored if s > 0]
+        if not selected:
+            return []
+        return selected[:max(k_min, min(k_max, len(selected)))]
+
+    def contradiction_topics(self, user_id: str, message: str) -> List[str]:
+        """Return memory texts that the current message may be negating/correcting."""
+        if not _NEGATION.search(message):
+            return []
+        with self._lock:
+            mem = list(self._load(user_id))
+        q = _tokens(message)
+        hits = []
+        for item in mem:
+            if len(q & _tokens(item.text)) >= 1 and item.kind != "name":
+                hits.append(item.text)
+        return hits[:3]
+
+    def forget_user(self, user_id: str) -> None:
+        with self._lock:
+            self._store.pop(user_id, None)
+            if self._dir is not None:
+                p = self._path(user_id)
+                if p.exists():
+                    try:
+                        p.unlink()
+                    except OSError:
+                        pass
+
+    def forget_session(self, user_id: str, session_id: str) -> None:
+        """Remove attributed evidence for one session, preserving other/legacy facts."""
+        with self._lock:
+            memories = self._load(user_id)
+            retained = []
+            for memory in memories:
+                if not memory.sources:  # legacy/unattributed: never guess
+                    retained.append(memory)
+                    continue
+                memory.sources = [
+                    source for source in memory.sources
+                    if source.get("session_id") != session_id
+                ]
+                if memory.sources:
+                    retained.append(memory)
+            self._store[user_id] = retained
+            self._persist(user_id, retained)
+
+    # ------------------------------------------------------------------
+    def _upsert(self, mem: List[UserMemory], cand: UserMemory) -> None:
+        cand_tokens = _tokens(cand.text)
+        for existing in mem:
+            # Same kind + strong overlap => update in place (dedupe).
+            if existing.kind == cand.kind and len(cand_tokens & _tokens(existing.text)) >= max(1, len(cand_tokens) // 2):
+                existing.text = cand.text
+                existing.updated_at = cand.updated_at
+                existing.weight = min(3.0, existing.weight + 0.2)
+                for source in cand.sources:
+                    if source not in existing.sources:
+                        existing.sources.append(source)
+                existing.extraction_version = cand.extraction_version
+                existing.confidence = max(existing.confidence, cand.confidence)
+                return
+        mem.append(cand)
+
+    def _path(self, user_id: str) -> Path:
+        safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in user_id)
+        return self._dir / f"{safe}.json"  # type: ignore[union-attr]
+
+    def _load(self, user_id: str) -> List[UserMemory]:
+        if user_id in self._store:
+            return self._store[user_id]
+        items: List[UserMemory] = []
+        if self._dir is not None:
+            p = self._path(user_id)
+            if p.exists():
+                try:
+                    data = json.loads(p.read_text(encoding="utf-8"))
+                    items = [UserMemory(**d) for d in data]
+                except Exception:
+                    items = []
+        self._store[user_id] = items
+        return items
+
+    def _persist(self, user_id: str, mem: List[UserMemory]) -> None:
+        if self._dir is None:
+            return
+        try:
+            payload = [vars(m) for m in mem]
+            self._path(user_id).write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+        except Exception:
+            pass

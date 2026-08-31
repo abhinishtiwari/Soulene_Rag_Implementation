@@ -1,11 +1,12 @@
-"""Request-level security: optional API-key auth and in-process rate limiting.
+"""Request-level API-key authentication and in-process rate limiting.
 
-Both are OFF by default so local development is frictionless. Enable in
-production by setting API_KEY (and optionally RATE_LIMIT_PER_MINUTE).
+Local development may explicitly run without API keys. Production deployments
+set REQUIRE_API_AUTH=true and fail startup unless separate client and administrator
+keys are configured.
 
-Auth model: a shared API key protects the service boundary. Write endpoints
-(/documents) can additionally require an ADMIN_API_KEY so a normal client
-cannot inject knowledge into the CAG cache.
+Auth model: a shared client key protects the service boundary. Write endpoints
+(/documents) always require a separate ADMIN_API_KEY so a normal client cannot
+inject knowledge into the CAG cache.
 
 The rate limiter is per-process. Behind multiple Render workers each worker
 holds its own window, so treat the effective limit as
@@ -53,11 +54,34 @@ class RateLimiter:
                 retry = max(1, int(60 - (now - bucket[0])))
                 return False, retry
             bucket.append(now)
-            # Opportunistic cleanup so idle keys don't accumulate forever.
-            if len(self._hits) > 10000:
-                for k in [k for k, v in self._hits.items() if not v]:
-                    self._hits.pop(k, None)
+            if len(self._hits) > self._CLEANUP_THRESHOLD:
+                self._evict(window_start)
             return True, 0
+
+    # Above this many tracked keys, sweep. One-shot identities never return, so
+    # waiting for them to be revisited would never reclaim their memory.
+    _CLEANUP_THRESHOLD = 10000
+    # Hard ceiling so a churn attack cannot grow the table without bound even if
+    # every bucket is nominally live.
+    _MAX_KEYS = 50000
+
+    def _evict(self, window_start: float) -> None:
+        """Drop keys whose most recent hit has aged out of the window.
+
+        Previously only already-empty buckets were removed, and buckets are only
+        emptied when their own key is checked again, so a key seen once was
+        retained forever.
+        """
+        for key in [k for k, hits in self._hits.items()
+                    if not hits or hits[-1] < window_start]:
+            self._hits.pop(key, None)
+        if len(self._hits) > self._MAX_KEYS:
+            # Oldest-first by most recent activity; dicts preserve insertion
+            # order, so sorting by last hit is explicit rather than implied.
+            ordered = sorted(self._hits.items(),
+                             key=lambda item: item[1][-1] if item[1] else 0.0)
+            for key, _ in ordered[:len(self._hits) - self._MAX_KEYS]:
+                self._hits.pop(key, None)
 
     def reset(self) -> None:
         with self._lock:
@@ -80,12 +104,12 @@ class ApiAuth:
         return bool(self.admin_api_key)
 
     @staticmethod
-    def extract_key(headers, args) -> str:
-        """Read the key from Authorization: Bearer, X-API-Key, or ?api_key=."""
+    def extract_key(headers, args=None) -> str:
+        """Read credentials from headers only; URLs must never carry secrets."""
         auth = (headers.get("Authorization") or "").strip()
         if auth.lower().startswith("bearer "):
             return auth[7:].strip()
-        return (headers.get("X-API-Key") or args.get("api_key") or "").strip()
+        return (headers.get("X-API-Key") or "").strip()
 
     def check(self, presented: str) -> bool:
         if not self.enabled:
@@ -96,8 +120,7 @@ class ApiAuth:
         return constant_time_equals(presented, self.api_key)
 
     def check_admin(self, presented: str) -> bool:
-        """Guard write operations (document upload/delete)."""
+        """Require the separate administrator key for write operations."""
         if not self.admin_enabled:
-            # No separate admin key configured -> fall back to normal auth.
-            return self.check(presented)
+            return False
         return constant_time_equals(presented, self.admin_api_key)

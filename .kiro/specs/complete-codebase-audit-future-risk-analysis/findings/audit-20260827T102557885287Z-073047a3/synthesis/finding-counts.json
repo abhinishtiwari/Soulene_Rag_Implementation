@@ -1,0 +1,35 @@
+{
+  "by_primary_domain": {
+    "architecture-correctness": 2,
+    "data-database": 3,
+    "dependency-supply-chain": 1,
+    "deployment-operations": 5,
+    "general-safety": 1,
+    "input-output-fail-safe": 2,
+    "memory-context": 1,
+    "mental-health-safety": 5,
+    "performance-reliability": 2,
+    "privacy": 5,
+    "rag-cag": 3,
+    "security": 5,
+    "testing-quality": 5
+  },
+  "by_priority": {
+    "P0": 3,
+    "P1": 25,
+    "P2": 11,
+    "P3": 1
+  },
+  "by_severity": {
+    "critical": 3,
+    "high": 25,
+    "low": 1,
+    "medium": 11
+  },
+  "by_temporal_class": {
+    "current-and-future": 19,
+    "current-defect": 9,
+    "future-risk": 12
+  },
+  "total": 40
+}

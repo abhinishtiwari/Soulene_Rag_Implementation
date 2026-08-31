@@ -1,0 +1,18 @@
+{
+  "created_root_paths": [
+    "issue.md",
+    "solution.md"
+  ],
+  "gate": "G7",
+  "issue_bytes": 82258,
+  "issue_sha256": "6ad6ac26d2f9df00aa210ebafd8c7ab797613fffb37d12255ff488ecedf35e6e",
+  "one_to_one_mapping": true,
+  "outcome": "pass",
+  "preexisting_root_deliverables": [],
+  "publication_method": "single parallel relocation of two validated findings-local staged reports",
+  "root_write_count": 2,
+  "run_id": "audit-20260827T102557885287Z-073047a3",
+  "schema_version": "1.0",
+  "solution_bytes": 135265,
+  "solution_sha256": "39212369759632f6b2ae40b76290e6ac2c0065d1bb759daa958200114828f5f9"
+}

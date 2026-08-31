@@ -1,0 +1,73 @@
+{
+  "changed_paths_ref": ".kiro/specs/complete-codebase-audit-future-risk-analysis/findings/audit-20260827T102557885287Z-073047a3/integrity/changed-paths.json",
+  "coverage": {
+    "architecture": true,
+    "inventory": true,
+    "passed": true,
+    "report_fields_and_counts": true,
+    "subsystems": true,
+    "test_ledger": true
+  },
+  "created_output_boundary": {
+    "alternate_case_collisions": [],
+    "created_count": 193,
+    "created_root_paths": [
+      "issue.md",
+      "solution.md"
+    ],
+    "exact_case_ok": true,
+    "passed": true,
+    "unauthorized_count": 0
+  },
+  "effective_readiness": "not-ready",
+  "gate": "G8",
+  "hard_failure_reasons": [],
+  "mechanical_integrity_and_cross_reference_checks_passed": true,
+  "outcome": "fail-closed",
+  "production_readiness_before_g8": "not-ready",
+  "property_validation": {
+    "property_4": "failed-unresolved-not-rerun",
+    "property_5": "failed-interrupted",
+    "property_6": "passed",
+    "property_8": "passed",
+    "property_9": "failed",
+    "statuses_preserved": true
+  },
+  "protected_integrity": {
+    "checked": 470,
+    "mismatch_count": 0,
+    "missing_count": 0,
+    "passed": true
+  },
+  "record_type": "final-g8-integrity-cross-reference",
+  "redaction": {
+    "hit_count": 0,
+    "hits": [],
+    "passed": true,
+    "scanned_file_count": 171
+  },
+  "references": {
+    "issue_count": 40,
+    "issue_unique_and_complete": true,
+    "models_one_to_one": true,
+    "passed": true,
+    "property_6": "passed",
+    "published_hashes_match_g7": true,
+    "solution_count": 40,
+    "solution_one_to_one": true
+  },
+  "repository_test_blockers": {
+    "environment_failures": 42,
+    "preserved": true,
+    "product_failures": 6
+  },
+  "run_id": "audit-20260827T102557885287Z-073047a3",
+  "schema_version": "1.0",
+  "unresolved_fail_closed_reasons": [
+    "Property 4 exact-case validator failure remains unresolved.",
+    "Property 5 remains interrupted with ^C/exit 1 and no summary or counterexample.",
+    "Property 9 failed because its generated expected-valid conditional record omitted the required condition; no rerun was performed.",
+    "Forty-two hardening tests remain environment failures from one 180-second batch timeout.",
+    "Six pipeline tests remain product failures."
+  ]
+}

@@ -1,0 +1,27 @@
+{
+    "schema_version":  "1.0",
+    "run_id":  "audit-20260826T200045765Z-6fe3c504",
+    "G0":  {
+               "outcome":  "pass",
+               "root_identity_confirmed":  true,
+               "deliverable_conflict_count":  0,
+               "containment_policy_recorded":  true,
+               "network_policy_recorded":  true,
+               "output_allowlist_recorded":  true
+           },
+    "G1":  {
+               "outcome":  "fail",
+               "manifest_entry_count":  0,
+               "regular_file_count":  0,
+               "hashed_regular_file_count":  0,
+               "directory_count":  1,
+               "error_count":  29,
+               "collision_count":  0,
+               "escaping_reparse_count":  0,
+               "manifest_digest_verified":  false
+           },
+    "unlocks":  {
+
+                },
+    "blocker":  "G1 failed; dependent analysis is blocked. See baseline/errors.jsonl and baseline/metadata.json."
+}

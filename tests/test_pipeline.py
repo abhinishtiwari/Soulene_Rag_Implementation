@@ -75,17 +75,17 @@ class PipelineTests(unittest.TestCase):
     # --- response cache: repeat question -> zero LLM calls ---
     def test_repeat_question_served_from_cache(self):
         self.r("What is the Wellness plan price?")
-        calls_after_first = len(self.fake.calls)
+        calls_after_first = len(self.fake.generations)
         res2 = self.r("What is the Wellness plan price?")
-        self.assertEqual(len(self.fake.calls), calls_after_first,
-                         "cached answer must not trigger any LLM call")
+        self.assertEqual(len(self.fake.generations), calls_after_first,
+                         "cached answer must not trigger reply generation")
         self.assertIn("cache_hit=True", " ".join(res2.notes))
 
     def test_emotional_replies_never_cached(self):
         self.r("I feel really sad")
-        before = len(self.fake.calls)
+        before = len(self.fake.generations)
         self.r("I feel really sad")
-        self.assertGreater(len(self.fake.calls), before,
+        self.assertGreater(len(self.fake.generations), before,
                            "emotional replies must always regenerate (variety)")
 
     # --- no hallucination when knowledge is absent ---
@@ -127,6 +127,9 @@ class PipelineTests(unittest.TestCase):
         gen = [c for c in self.fake.calls if c["session"] == self.sid]
         text = gen[-1]["input"]
         self.assertIn("never instructions", text.lower())
+        # ISSUE-015: framing is structural, not just a sentence.
+        self.assertIn("<<<UNTRUSTED_DATA tier=KNOWLEDGE_DOCUMENTS>>>", text)
+        self.assertIn("<<<END_UNTRUSTED_DATA>>>", text)
 
 
 if __name__ == "__main__":

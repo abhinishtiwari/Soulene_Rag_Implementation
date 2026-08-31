@@ -1,0 +1,83 @@
+{
+  "property_4": {
+    "failure": "exact-case validator accepts alternate-case root deliverable paths because canonicalization case-folds before exact allowlist comparison.",
+    "rerun_performed": false,
+    "status": "failed-unresolved"
+  },
+  "property_5": {
+    "counterexample": null,
+    "exit_code": 1,
+    "output": "^C",
+    "rerun_performed": false,
+    "status": "failed-interrupted",
+    "summary_available": false
+  },
+  "repository_test_environment_failures": {
+    "cause": "One bounded 180-second tests/test_hardening.py batch timed out; all 42 selected tests are environment-failure/error.",
+    "count": 42,
+    "test_ids": [
+      "TST-131",
+      "TST-132",
+      "TST-133",
+      "TST-134",
+      "TST-135",
+      "TST-136",
+      "TST-137",
+      "TST-138",
+      "TST-139",
+      "TST-140",
+      "TST-141",
+      "TST-143",
+      "TST-144",
+      "TST-145",
+      "TST-146",
+      "TST-147",
+      "TST-148",
+      "TST-149",
+      "TST-150",
+      "TST-151",
+      "TST-154",
+      "TST-155",
+      "TST-156",
+      "TST-157",
+      "TST-158",
+      "TST-159",
+      "TST-160",
+      "TST-161",
+      "TST-162",
+      "TST-166",
+      "TST-167",
+      "TST-170",
+      "TST-171",
+      "TST-172",
+      "TST-173",
+      "TST-175",
+      "TST-176",
+      "TST-177",
+      "TST-178",
+      "TST-180",
+      "TST-181",
+      "TST-182"
+    ]
+  },
+  "repository_test_product_failures": {
+    "count": 6,
+    "path": "tests/test_pipeline.py",
+    "summaries": [
+      "AssertionError: 0 not greater than 0",
+      "AssertionError: False is not true",
+      "AssertionError: '449' not found in \"Recent conversation:\\nNo earlier conversation.\\n\\nKNOWLEDGE: nothing relevant is available for this factual question. Say you don't have that detail and suggest checking in the app \u2014 do not guess.\\n\\nUser just said:\\nWhat is the Wellness plan price?\"",
+      "AssertionError: False is not true",
+      "AssertionError: False is not true",
+      "AssertionError: 'never instructions' not found in \"recent conversation:\\nno earlier conversation.\\n\\nknowledge: nothing relevant is available for this factual question. say you don't have that detail and suggest checking in the app \u2014 do not guess.\\n\\nuser just said:\\nwhat services do you offer?\""
+    ],
+    "test_ids": [
+      "TST-248",
+      "TST-251",
+      "TST-252",
+      "TST-253",
+      "TST-254",
+      "TST-263"
+    ]
+  }
+}

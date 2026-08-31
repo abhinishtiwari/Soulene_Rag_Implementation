@@ -4,6 +4,13 @@
 - generate(): echoes back the retrieved knowledge it was given, plus a marker,
   so tests can assert that RAG context reached the model and that grounding
   instructions are present. The output-review pass returns the draft unchanged.
+
+ISSUE-040: every `generate()` call is tagged with its purpose. The output
+reviewer, the rolling-summary pass and the crisis pass all go through
+`generate()`, so a raw `len(calls)` assertion silently depends on whether
+`ENABLE_OUTPUT_SAFETY_CHECK` happens to be on in the local `.env`. Tests that
+mean "no reply was generated" or "the cache avoided the model" count
+`generations` instead, which holds under either configuration.
 """
 
 from __future__ import annotations
@@ -11,9 +18,24 @@ from __future__ import annotations
 from app.types import ModerationSignal
 
 
+def _purpose(session_id: str, instructions: str) -> str:
+    if session_id.endswith(":review"):
+        return "review"
+    if session_id.endswith("_summary") or "summarize what this person" in instructions.lower():
+        return "summary"
+    if session_id.endswith(":crisis"):
+        return "crisis"
+    return "generate"
+
+
 class FakeLLMClient:
     def __init__(self):
         self.calls = []
+
+    @property
+    def generations(self) -> list:
+        """Reply-producing calls only: no review, summary or crisis passes."""
+        return [c for c in self.calls if c.get("purpose") == "generate"]
 
     def moderate(self, text: str) -> ModerationSignal:
         return ModerationSignal(flagged=False, categories={})
@@ -45,7 +67,8 @@ class FakeLLMClient:
     def generate(self, *, instructions: str, input_text: str, session_id: str,
                  temperature=None, max_output_tokens=None) -> str:
         self.calls.append({"instructions": instructions, "input": input_text,
-                           "session": session_id})
+                           "session": session_id,
+                           "purpose": _purpose(session_id, instructions)})
         # Rolling-summary pass: the real model returns a narrative summary of the
         # overflow. Model that here by echoing the overflowed user text so tests
         # can assert the summary both exists and captures earlier topics.

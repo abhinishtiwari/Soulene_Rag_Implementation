@@ -1,166 +1,404 @@
-"""Long-term memory backed by MongoDB — drop-in replacement for LongTermMemory.
+"""MongoDB-backed long-term memory with canonical extraction semantics.
 
-Same extraction logic, same retrieve/observe API. Only storage changes.
-Returns UserMemory objects identically to the JSON version.
+Writes use multi-document transactions and therefore require MongoDB to run as
+a replica set (including a single-node replica set) or through a sharded cluster.
 """
 
 from __future__ import annotations
 
 import re
 import time
-from threading import Lock
-from typing import Dict, List, Optional
+import uuid
+from dataclasses import dataclass
+from typing import List, Optional
 
+from pymongo.read_concern import ReadConcern
+from pymongo.read_preferences import ReadPreference
+from pymongo.write_concern import WriteConcern
+
+from app.memory.long_term_memory import (
+    _ACHIEVEMENT,
+    _CONTEXT,
+    _COPING,
+    _GOAL,
+    _MAX_MEMORIES,
+    _NAME,
+    _NEGATION,
+    _PREF,
+    _RELATION,
+    _SLEEP,
+    _STYLE,
+    _SYNONYMS,
+    _TRIGGER,
+    _tokens,
+)
 from app.types import UserMemory
 
-_MAX_MEMORIES = 50
-_STOPWORDS = {
-    "the", "and", "for", "with", "that", "this", "from", "have", "about", "what",
-    "when", "your", "you", "are", "was", "were", "im", "me", "my", "to", "of",
-    "in", "is", "it", "a", "an", "i", "feel", "feeling", "today", "just",
-}
 
-# Same extraction patterns as the JSON version (imported logic unchanged)
-_NAME = re.compile(r"\b(?:my name is|call me|mera naam|mujhe log bulate hain)\s+([a-z][a-z '\-]{1,30})", re.I)
-_PREF = re.compile(r"\b(i (?:like|love|enjoy|prefer|hate|dislike|can'?t stand)\s+[a-z].{2,40})", re.I)
-_CONTEXT = re.compile(r"\b(i (?:work as|study|am studying|have (?:exams?|an interview|a deadline)|live in|am a)\s+[a-z].{2,50})", re.I)
-_RELATION = re.compile(r"\b((?:my )?(?:mother|father|mom|dad|sister|brother|wife|husband|partner|girlfriend|boyfriend|friend|boss)\b.{0,50})", re.I)
-_TRIGGER = re.compile(r"\b((?:my )?(?:anxiety|stress|panic|overthinking)\s+(?:is )?(?:triggered by|starts when|gets worse when|comes from)\s+[a-z].{2,60}|i (?:get|feel) (?:anxious|stressed|panicky|overwhelmed) (?:when|before|around|during)\s+[a-z].{2,60})", re.I)
-_COPING = re.compile(r"\b((?:deep breathing|journaling|walking|running|music|meditation|yoga|praying|painting|talking to \w+)\s+(?:really )?(?:helps?|helped|works?|worked|calms? me)[a-z ]{0,30}|i feel better (?:when|after) i\s+[a-z].{2,50})", re.I)
-_SLEEP = re.compile(r"\b(i (?:sleep|can'?t sleep|barely sleep|hardly sleep)\s*[a-z0-9].{2,50}|i (?:go to bed|wake up)\s+(?:at|around)\s+[a-z0-9].{1,25}|my sleep (?:is|has been)\s+[a-z].{2,40})", re.I)
-_GOAL = re.compile(r"\b(i want to\s+(?:be|feel|get|start|stop|build|improve|become)\s+[a-z].{2,55}|my goal is\s+[a-z].{2,55}|i'?m (?:trying|working) to\s+[a-z].{2,55})", re.I)
-_ACHIEVEMENT = re.compile(r"\b(i (?:finally|just)\s+(?:did|got|passed|finished|completed|achieved|won|started|managed|submitted|\w+ed)\b.{0,50}|i (?:got|passed|finished|completed|achieved|won)\s+(?:my|the|a|an)\s+[a-z].{2,50})", re.I)
-_STYLE = re.compile(r"\b((?:please )?(?:don'?t|do not) (?:give me advice|tell me what to do|ask too many questions)[a-z ]{0,30}|i (?:just )?(?:want|prefer) (?:to vent|you to listen|short (?:replies|answers)|advice)[a-z ]{0,30})", re.I)
-_NEGATION = re.compile(r"\b(don'?t|do not|no longer|not anymore|isn'?t|used to but|stopped)\b", re.I)
-
-
-def _tokens(text: str) -> set:
-    return {t for t in re.findall(r"[a-z0-9']+", text.lower()) if len(t) > 2 and t not in _STOPWORDS}
+@dataclass
+class _StoredMemory:
+    memory_id: str
+    memory: UserMemory
 
 
 class LongTermMemoryMongo:
-    """MongoDB-backed long-term user memory."""
+    """MongoDB-backed drop-in replacement for ``LongTermMemory``."""
 
     COLLECTION = "memory"
 
-    def __init__(self, db):
+    def __init__(self, db) -> None:
         self._db = db
         self._col = db[self.COLLECTION]
-        self._lock = Lock()
-        self._cache: Dict[str, List[UserMemory]] = {}
+        self._owner_locks = db["memory_owner_locks"]
+        self._deleted_users = db["deleted_users"]
         self._ensure_indexes()
 
-    def _ensure_indexes(self):
-        try:
-            self._col.create_index("user_id")
-            self._col.create_index([("user_id", 1), ("weight", -1)])
-        except Exception:
-            pass
+    def _ensure_indexes(self) -> None:
+        self._col.create_index(
+            [("user_id", 1), ("memory_id", 1)],
+            unique=True,
+            name="uniq_memory_owner_id",
+        )
+        self._col.create_index(
+            [("user_id", 1), ("ordinal", 1)],
+            name="idx_memory_owner_order",
+        )
+        self._owner_locks.create_index(
+            [("user_id", 1)], unique=True, name="uniq_memory_owner_lock"
+        )
 
-    def observe(self, user_id: str, message: str) -> None:
-        candidates = []
+    def observe(
+        self, user_id: str, message: str, *,
+        source_session_id: Optional[str] = None,
+        source_message_id: Optional[str] = None,
+        extraction_version: str = "rules-v1",
+        confidence: float = 1.0,
+    ) -> None:
+        """Extract facts with auditable committed-message provenance."""
+        candidates: List[UserMemory] = []
         now = time.time()
 
-        m = _NAME.search(message)
-        if m:
-            raw = m.group(1).strip().split()
-            filler = {"by", "the", "way", "and", "but", "so", "just", "actually", "here", "now"}
-            name_parts = [w for w in raw[:2] if w.lower() not in filler]
+        match = _NAME.search(message)
+        if match:
+            raw = match.group(1).strip().split()
+            filler = {
+                "by", "the", "way", "and", "but", "so", "just",
+                "actually", "here", "now",
+            }
+            name_parts = []
+            for word in raw[:2]:
+                if word.lower() in filler:
+                    break
+                name_parts.append(word)
             name = " ".join(name_parts).strip(" '-")
             if name and name.lower() not in filler:
-                candidates.append(UserMemory(text=f"User's name: {name}", kind="name", created_at=now, updated_at=now, weight=2.0))
+                candidates.append(
+                    UserMemory(
+                        text=f"User's name: {name}",
+                        kind="name",
+                        created_at=now,
+                        updated_at=now,
+                        weight=2.0,
+                    )
+                )
 
-        for pat, kind, weight in [
-            (_TRIGGER, "trigger", 2.0), (_COPING, "coping_strategy", 2.0),
-            (_GOAL, "goal", 1.6), (_SLEEP, "sleep", 1.4),
-            (_STYLE, "communication_style", 1.8), (_ACHIEVEMENT, "achievement", 1.2),
-            (_PREF, "preference", 1.0), (_CONTEXT, "context", 1.0), (_RELATION, "relationship", 1.0),
-        ]:
-            for match in pat.finditer(message):
+        for pattern, kind, weight in (
+            (_TRIGGER, "trigger", 2.0),
+            (_COPING, "coping_strategy", 2.0),
+            (_GOAL, "goal", 1.6),
+            (_SLEEP, "sleep", 1.4),
+            (_STYLE, "communication_style", 1.8),
+            (_ACHIEVEMENT, "achievement", 1.2),
+            (_PREF, "preference", 1.0),
+            (_CONTEXT, "context", 1.0),
+            (_RELATION, "relationship", 1.0),
+        ):
+            for match in pattern.finditer(message):
                 text = re.sub(r"\s+", " ", match.group(1)).strip()
                 if 4 <= len(text) <= 90:
-                    candidates.append(UserMemory(text=text, kind=kind, created_at=now, updated_at=now, weight=weight))
+                    candidates.append(
+                        UserMemory(
+                            text=text,
+                            kind=kind,
+                            created_at=now,
+                            updated_at=now,
+                            weight=weight,
+                        )
+                    )
 
         if not candidates:
             return
+        source = None
+        if source_session_id and source_message_id:
+            source = {"session_id": source_session_id, "message_id": source_message_id}
+        for candidate in candidates:
+            candidate.sources = [source] if source else []
+            candidate.extraction_version = extraction_version
+            candidate.confidence = max(0.0, min(1.0, float(confidence)))
 
-        with self._lock:
-            mem = self._load(user_id)
-            for cand in candidates:
-                self._upsert(mem, cand)
-            mem.sort(key=lambda x: (x.weight, x.updated_at), reverse=True)
-            del mem[_MAX_MEMORIES:]
-            self._cache[user_id] = mem
-            self._persist(user_id, mem)
+        def update_owner(session) -> None:
+            if self._deleted_users.find_one(
+                {"user_id": user_id}, projection={"_id": 1}, session=session
+            ) is not None:
+                raise PermissionError("user identity has been deleted")
+            # All workers contend on one owner document. Mongo transaction write
+            # conflicts are retried by with_transaction, preventing stale
+            # read/replace cycles from dropping another worker's memories.
+            self._owner_locks.update_one(
+                {"user_id": user_id},
+                {"$inc": {"version": 1}},
+                upsert=True, session=session,
+            )
+            memories = self._load(user_id, session=session)
+            for candidate in candidates:
+                self._upsert(memories, candidate)
+            memories.sort(
+                key=lambda record: (
+                    record.memory.weight,
+                    record.memory.updated_at,
+                ),
+                reverse=True,
+            )
+            del memories[_MAX_MEMORIES:]
+            self._replace_owner(user_id, memories, session=session)
 
-    def retrieve(self, user_id: str, message: str, k_min: int = 3, k_max: int = 8) -> List[UserMemory]:
-        with self._lock:
-            mem = list(self._load(user_id))
-        if not mem:
+        with self._db.client.start_session() as session:
+            session.with_transaction(
+                update_owner,
+                read_concern=ReadConcern("snapshot"),
+                write_concern=WriteConcern("majority"),
+                read_preference=ReadPreference.PRIMARY,
+            )
+
+    def retrieve(
+        self,
+        user_id: str,
+        message: str,
+        k_min: int = 3,
+        k_max: int = 8,
+    ) -> List[UserMemory]:
+        # Quarantined records must never reach a prompt.
+        memories = [record.memory for record in self._load(user_id)
+                    if not record.memory.quarantined_at]
+        if not memories:
             return []
-        q = _tokens(message)
-        if not q:
-            return []
+
+        query = _tokens(message)
+        if not query:
+            always = [
+                memory
+                for memory in memories
+                if memory.kind in ("name", "communication_style")
+            ]
+            return always[:k_min] if always else []
+
+        expanded_query = set(query)
+        for token in query:
+            if token in _SYNONYMS:
+                expanded_query.update(_SYNONYMS[token])
+
         scored = []
-        for item in mem:
-            overlap = len(q & _tokens(item.text))
-            if overlap > 0 or item.kind == "name":
-                score = overlap + (0.5 if item.kind == "name" else 0) + 0.1 * item.weight
-                scored.append((score, item))
-        scored.sort(key=lambda x: x[0], reverse=True)
-        selected = [item for s, item in scored if s > 0]
-        return selected[:max(k_min, min(k_max, len(selected)))] if selected else []
+        for item in memories:
+            item_tokens = _tokens(item.text)
+            direct_overlap = len(query & item_tokens)
+            synonym_overlap = len((expanded_query - query) & item_tokens)
+            overlap = direct_overlap + (synonym_overlap * 0.6)
+
+            if item.kind in ("name", "communication_style"):
+                score = overlap + 1.0 + 0.1 * item.weight
+            elif overlap > 0:
+                recency_bonus = min(
+                    0.3,
+                    0.1 * (item.updated_at / (time.time() or 1)),
+                )
+                score = overlap + 0.1 * item.weight + recency_bonus
+            else:
+                continue
+            scored.append((score, item))
+
+        scored.sort(key=lambda pair: pair[0], reverse=True)
+        selected = [item for score, item in scored if score > 0]
+        if not selected:
+            return []
+        return selected[:max(k_min, min(k_max, len(selected)))]
 
     def contradiction_topics(self, user_id: str, message: str) -> List[str]:
+        """Return stored facts that the current message may be correcting."""
         if not _NEGATION.search(message):
             return []
-        with self._lock:
-            mem = list(self._load(user_id))
-        q = _tokens(message)
-        return [item.text for item in mem if len(q & _tokens(item.text)) >= 1 and item.kind != "name"][:3]
+        memories = [record.memory for record in self._load(user_id)
+                    if not record.memory.quarantined_at]
+        query = _tokens(message)
+        hits = []
+        for item in memories:
+            if len(query & _tokens(item.text)) >= 1 and item.kind != "name":
+                hits.append(item.text)
+        return hits[:3]
+
+    def purge_expired(self, *, cutoff: Optional[float]) -> int:
+        """Drop memories not reinforced since the cutoff, and expired quarantine.
+
+        Quarantined records share the one memory window (see SQLite twin).
+        """
+        if cutoff is None:
+            return 0
+        result = self._col.with_options(
+            write_concern=WriteConcern("majority")
+        ).delete_many({"$or": [
+            {"updated_at": {"$lt": cutoff}},
+            {"quarantined_at": {"$gt": 0, "$lt": cutoff}},
+        ]})
+        return int(result.deleted_count)
 
     def forget_user(self, user_id: str) -> None:
-        with self._lock:
-            self._cache.pop(user_id, None)
-        try:
-            self._col.delete_many({"user_id": user_id})
-        except Exception:
-            pass
+        self._col.with_options(write_concern=WriteConcern("majority")).delete_many(
+            {"user_id": user_id}
+        )
 
-    def _upsert(self, mem, cand):
-        cand_tokens = _tokens(cand.text)
-        for existing in mem:
-            if existing.kind == cand.kind and len(cand_tokens & _tokens(existing.text)) >= max(1, len(cand_tokens) // 2):
-                existing.text = cand.text
-                existing.updated_at = cand.updated_at
+    def forget_session(self, user_id: str, session_id: str) -> Dict[str, int]:
+        """Delete this session's evidence and quarantine what cannot be proven.
+
+        Mirrors the SQLite contract exactly: removed / quarantined / retained.
+        """
+        now = time.time()
+        outcome = {"removed": 0, "quarantined": 0, "retained": 0}
+
+        def update_owner(session) -> None:
+            outcome.update({"removed": 0, "quarantined": 0, "retained": 0})
+            self._owner_locks.update_one(
+                {"user_id": user_id}, {"$inc": {"version": 1}},
+                upsert=True, session=session,
+            )
+            memories = self._load(user_id, session=session)
+            keep = []
+            for record in memories:
+                if not record.memory.sources:
+                    if not record.memory.quarantined_at:
+                        record.memory.quarantined_at = now
+                    outcome["quarantined"] += 1
+                    keep.append(record)
+                    continue
+                record.memory.sources = [
+                    source for source in record.memory.sources
+                    if source.get("session_id") != session_id
+                ]
+                if record.memory.sources:
+                    outcome["retained"] += 1
+                    keep.append(record)
+                else:
+                    outcome["removed"] += 1
+            self._replace_owner(user_id, keep, session=session)
+
+        with self._db.client.start_session() as session:
+            session.with_transaction(
+                update_owner, read_concern=ReadConcern("snapshot"),
+                write_concern=WriteConcern("majority"),
+                read_preference=ReadPreference.PRIMARY,
+            )
+        return outcome
+
+    def _load(self, user_id: str, *, session=None) -> List[_StoredMemory]:
+        cursor = (
+            self._col.find({"user_id": user_id}, session=session)
+            .sort([("ordinal", 1), ("weight", -1), ("updated_at", -1)])
+            .limit(_MAX_MEMORIES)
+        )
+        memories = []
+        for row in cursor:
+            memory_id = row.get("memory_id")
+            if not memory_id:
+                legacy_key = row.get("_id")
+                if legacy_key is None:
+                    legacy_key = "|".join(
+                        str(row.get(field, ""))
+                        for field in (
+                            "kind", "text", "created_at", "updated_at", "weight"
+                        )
+                    )
+                memory_id = uuid.uuid5(
+                    uuid.NAMESPACE_URL,
+                    f"long-term-memory:{user_id}:{legacy_key}",
+                ).hex
+            memories.append(
+                _StoredMemory(
+                    memory_id=str(memory_id),
+                    memory=UserMemory(
+                        quarantined_at=float(row.get("quarantined_at") or 0.0),
+                        text=row.get("text", ""),
+                        kind=row.get("kind", "fact"),
+                        created_at=row.get("created_at", 0),
+                        updated_at=row.get("updated_at", 0),
+                        weight=row.get("weight", 1.0),
+                        sources=list(row.get("sources") or []),
+                        extraction_version=str(row.get("extraction_version") or "legacy"),
+                        confidence=float(row.get("confidence", 1.0)),
+                    ),
+                )
+            )
+        return memories
+
+    @staticmethod
+    def _upsert(
+        memories: List[_StoredMemory],
+        candidate: UserMemory,
+    ) -> None:
+        candidate_tokens = _tokens(candidate.text)
+        for record in memories:
+            existing = record.memory
+            if (
+                existing.kind == candidate.kind
+                and len(candidate_tokens & _tokens(existing.text))
+                >= max(1, len(candidate_tokens) // 2)
+            ):
+                existing.text = candidate.text
+                existing.updated_at = candidate.updated_at
                 existing.weight = min(3.0, existing.weight + 0.2)
+                for source in candidate.sources:
+                    if source not in existing.sources:
+                        existing.sources.append(source)
+                existing.extraction_version = candidate.extraction_version
+                existing.confidence = max(existing.confidence, candidate.confidence)
                 return
-        mem.append(cand)
+        memories.append(_StoredMemory(uuid.uuid4().hex, candidate))
 
-    def _load(self, user_id: str) -> List[UserMemory]:
-        if user_id in self._cache:
-            return self._cache[user_id]
-        items = []
-        try:
-            for r in self._col.find({"user_id": user_id}).sort("weight", -1).limit(_MAX_MEMORIES):
-                items.append(UserMemory(
-                    text=r.get("text", ""), kind=r.get("kind", "fact"),
-                    created_at=r.get("created_at", 0), updated_at=r.get("updated_at", 0),
-                    weight=r.get("weight", 1.0),
-                ))
-        except Exception:
-            pass
-        self._cache[user_id] = items
-        return items
+    def _replace_owner(
+        self,
+        user_id: str,
+        memories: List[_StoredMemory],
+        *,
+        session,
+    ) -> None:
+        retained_ids = []
+        for ordinal, record in enumerate(memories):
+            retained_ids.append(record.memory_id)
+            memory = record.memory
+            self._col.replace_one(
+                {"user_id": user_id, "memory_id": record.memory_id},
+                {
+                    "user_id": user_id,
+                    "memory_id": record.memory_id,
+                    "text": memory.text,
+                    "kind": memory.kind,
+                    "created_at": memory.created_at,
+                    "updated_at": memory.updated_at,
+                    "weight": memory.weight,
+                    "ordinal": ordinal,
+                    "sources": list(memory.sources),
+                    "extraction_version": memory.extraction_version,
+                    "confidence": memory.confidence,
+                    "quarantined_at": memory.quarantined_at,
+                },
+                upsert=True,
+                session=session,
+            )
 
-    def _persist(self, user_id: str, mem: List[UserMemory]) -> None:
-        try:
-            self._col.delete_many({"user_id": user_id})
-            if mem:
-                self._col.insert_many([
-                    {"user_id": user_id, "text": m.text, "kind": m.kind,
-                     "weight": m.weight, "created_at": m.created_at, "updated_at": m.updated_at}
-                    for m in mem
-                ])
-        except Exception:
-            pass
+        if retained_ids:
+            self._col.delete_many(
+                {
+                    "user_id": user_id,
+                    "memory_id": {"$nin": retained_ids},
+                },
+                session=session,
+            )
+        else:
+            self._col.delete_many({"user_id": user_id}, session=session)

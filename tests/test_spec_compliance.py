@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import unittest
 import uuid
+from dataclasses import replace
 
 from app.chatbot import build_chatbot
 from app.chatbot.analyzer import Analyzer
@@ -223,14 +224,31 @@ class AuthAndRateLimitTests(unittest.TestCase):
         self.assertTrue(auth.check_admin("admin-key"))
         self.assertTrue(auth.check("admin-key"), "admin key also works as a client key")
 
-    def test_admin_falls_back_when_unset(self):
+    def test_admin_access_is_disabled_when_separate_key_is_unset(self):
         auth = ApiAuth("only-key")
-        self.assertTrue(auth.check_admin("only-key"))
+        self.assertFalse(auth.check_admin("only-key"))
+
+    def test_issue_022_production_auth_configuration_fails_closed(self):
+        base = replace(
+            Settings.from_env(), require_api_auth=True,
+            api_key="client-secret", admin_api_key="admin-secret",
+        )
+        base.validate_security()
+        invalid = (
+            {"api_key": ""},
+            {"admin_api_key": ""},
+            {"api_key": "same-secret", "admin_api_key": "same-secret"},
+        )
+        for updates in invalid:
+            with self.subTest(updates=updates), self.assertRaises(RuntimeError):
+                replace(base, **updates).validate_security()
+
+        replace(base, require_api_auth=False, api_key="", admin_api_key="").validate_security()
 
     def test_extract_key_from_bearer_and_header(self):
         self.assertEqual(ApiAuth.extract_key({"Authorization": "Bearer abc123"}, {}), "abc123")
         self.assertEqual(ApiAuth.extract_key({"X-API-Key": "xyz"}, {}), "xyz")
-        self.assertEqual(ApiAuth.extract_key({}, {"api_key": "qqq"}), "qqq")
+        self.assertEqual(ApiAuth.extract_key({}, {"api_key": "qqq"}), "")
 
     def test_rate_limiter_disabled_by_default(self):
         rl = RateLimiter(0)
@@ -246,6 +264,40 @@ class AuthAndRateLimitTests(unittest.TestCase):
         allowed, retry = rl.check("k")
         self.assertFalse(allowed)
         self.assertGreater(retry, 0)
+
+    def test_issue_024_stale_non_empty_buckets_are_evicted(self):
+        limiter = RateLimiter(60)
+        limiter._CLEANUP_THRESHOLD = 50
+        for index in range(60):
+            limiter.check(f"user:{index}")
+        # Age every recorded hit beyond the one-minute window.
+        for bucket in limiter._hits.values():
+            for position in range(len(bucket)):
+                bucket[position] -= 3600
+        limiter.check("someone-new")
+        self.assertLessEqual(len(limiter._hits), 2,
+                             "idle one-shot identities must not be retained")
+
+    def test_issue_024_live_buckets_survive_eviction(self):
+        limiter = RateLimiter(2)
+        limiter._CLEANUP_THRESHOLD = 50
+        for index in range(60):
+            limiter.check(f"user:{index}")
+        limiter.check("active")
+        limiter.check("active")
+        # The active key is still inside its window, so its count must persist.
+        allowed, retry = limiter.check("active")
+        self.assertFalse(allowed)
+        self.assertGreater(retry, 0)
+
+    def test_issue_024_key_count_has_a_hard_ceiling(self):
+        limiter = RateLimiter(60)
+        # Exercise the ceiling with small numbers rather than 50k real keys.
+        limiter._CLEANUP_THRESHOLD = 10
+        limiter._MAX_KEYS = 20
+        for index in range(200):
+            limiter.check(f"user:{index}")
+        self.assertLessEqual(len(limiter._hits), limiter._MAX_KEYS)
 
     def test_rate_limiter_is_per_identity(self):
         rl = RateLimiter(2)
@@ -264,9 +316,11 @@ class AuthEndpointTests(unittest.TestCase):
         main._service = bc(Settings.from_env(), client=FakeLLMClient(), build_client=False)
         self.client = main.app.test_client()
         self._orig_auth, self._orig_lim = main._auth, main._limiter
+        self._orig_anon = main._anon_limiter
 
     def tearDown(self):
         self.main._auth, self.main._limiter = self._orig_auth, self._orig_lim
+        self.main._anon_limiter = self._orig_anon
 
     def test_health_open_when_auth_enabled(self):
         self.main._auth = ApiAuth("k")
@@ -287,6 +341,34 @@ class AuthEndpointTests(unittest.TestCase):
         r = self.client.post("/documents", data=data, content_type="multipart/form-data",
                              headers={"X-API-Key": "client"})
         self.assertEqual(r.status_code, 401, "client key must not upload knowledge")
+
+    def test_upload_is_disabled_without_separate_admin_key(self):
+        import io
+        self.main._auth = ApiAuth("client")
+        data = {"file": (io.BytesIO(b"# T\nhi"), "x.md")}
+        r = self.client.post("/documents", data=data, content_type="multipart/form-data",
+                             headers={"X-API-Key": "client"})
+        self.assertEqual(r.status_code, 401)
+
+    def test_issue_023_identity_churn_cannot_mint_fresh_quota(self):
+        self.main._limiter = RateLimiter(3)
+        self.main._anon_limiter = RateLimiter(6)
+        # Each fresh client discards the identity cookie, so every request is
+        # charged to the coarse network bucket instead of a brand-new user.
+        codes = [self.main.app.test_client().post(
+            "/chat", json={"message": "hi"}).status_code for _ in range(10)]
+        self.assertEqual(codes.count(429), 4)
+        self.assertEqual(codes.count(200), 6)
+
+    def test_issue_023_retained_identity_keeps_its_own_limit(self):
+        self.main._limiter = RateLimiter(2)
+        self.main._anon_limiter = RateLimiter(50)
+        client = self.main.app.test_client()
+        codes = [client.post("/chat", json={"message": "hi"}).status_code
+                 for _ in range(4)]
+        # The network bucket must not consume a well-behaved caller's quota.
+        self.assertEqual(codes[:2], [200, 200])
+        self.assertEqual(codes[2:], [429, 429])
 
     def test_rate_limit_returns_429(self):
         self.main._limiter = RateLimiter(2)

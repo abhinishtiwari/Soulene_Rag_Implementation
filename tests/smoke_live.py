@@ -1,14 +1,26 @@
 """Live end-to-end validation against the real OpenAI API.
 
-Run: python -m tests.smoke_live
-Not part of the automated suite (costs tokens).
+Run: SOULENE_ALLOW_LIVE_SMOKE=1 python -m tests.smoke_live
+Lane `smoke-live` in tests/lanes.py. Not part of the automated suite: it costs
+tokens and, because it uses Settings.from_env(), it writes the repository's
+real data/ directory.
 """
 
 from __future__ import annotations
 
+import os
 import sys
 import time
 import uuid
+
+# ISSUE-033: opt-in guard, so an accidental run cannot spend provider budget or
+# write the developer's real archive.
+if os.getenv("SOULENE_ALLOW_LIVE_SMOKE", "").lower() not in {"1", "true", "yes"}:
+    print("Refusing to run the live smoke lane.")
+    print("  - it makes real provider calls (costs tokens)")
+    print("  - it writes the repository's data/ directory, not a sandbox")
+    print("Set SOULENE_ALLOW_LIVE_SMOKE=1 for a deliberate run.")
+    sys.exit(2)
 
 try:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")

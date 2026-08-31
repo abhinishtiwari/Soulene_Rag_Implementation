@@ -1,0 +1,7 @@
+{
+  "status": "passed",
+  "entrypoints": 13,
+  "edges": 16,
+  "subsystems": 7,
+  "negative_examples": 2
+}

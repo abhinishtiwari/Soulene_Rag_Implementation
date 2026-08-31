@@ -1,0 +1,18 @@
+{
+  "artifact_counts": {
+    "application-flow.jsonl": 5,
+    "deployment-operations.jsonl": 7,
+    "memory-rag-cag.jsonl": 5,
+    "persistence.jsonl": 5,
+    "safety-scenarios.jsonl": 20,
+    "safety.jsonl": 6,
+    "security-privacy.jsonl": 7,
+    "testing-quality.jsonl": 5
+  },
+  "finding_count": 40,
+  "gate": "G4-subsystem-artifacts-pending-validation",
+  "run_id": "audit-20260827T102557885287Z-073047a3",
+  "scenario_count": 20,
+  "schema_version": "1.0",
+  "test_catalog_count": 411
+}

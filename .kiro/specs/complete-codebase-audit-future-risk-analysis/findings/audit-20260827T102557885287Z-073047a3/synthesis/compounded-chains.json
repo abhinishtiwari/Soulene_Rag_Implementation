@@ -1,0 +1,75 @@
+[
+  {
+    "chain_id": "CHAIN-001",
+    "compounded_severity": "critical",
+    "description": "Injection-class input can reach a model with prompt-labeled stored/retrieved context that also crosses an externally controlled privacy boundary.",
+    "finding_ids": [
+      "ISSUE-003",
+      "ISSUE-015",
+      "ISSUE-028"
+    ]
+  },
+  {
+    "chain_id": "CHAIN-002",
+    "compounded_severity": "critical",
+    "description": "Non-unique document identity, non-atomic lifecycle operations, shared cache staging, worker-local state, and ephemeral paths can produce persistent knowledge divergence.",
+    "finding_ids": [
+      "ISSUE-004",
+      "ISSUE-012",
+      "ISSUE-014",
+      "ISSUE-034",
+      "ISSUE-035"
+    ]
+  },
+  {
+    "chain_id": "CHAIN-003",
+    "compounded_severity": "critical",
+    "description": "Pre-commit local safety mutation, context-poor fallback, and multi-worker process isolation can make safety continuity depend on worker/failure routing.",
+    "finding_ids": [
+      "ISSUE-002",
+      "ISSUE-007",
+      "ISSUE-034"
+    ]
+  },
+  {
+    "chain_id": "CHAIN-004",
+    "compounded_severity": "critical",
+    "description": "Fail-open output review, prompt-only relational boundaries, and incomplete scenario coverage can permit high-impact therapeutic harm regressions.",
+    "finding_ids": [
+      "ISSUE-008",
+      "ISSUE-011",
+      "ISSUE-031"
+    ]
+  },
+  {
+    "chain_id": "CHAIN-005",
+    "compounded_severity": "critical",
+    "description": "Indefinite retention, incomplete deletion, non-transactional deletion, readable fields, and tracked runtime data compound sensitive-data exposure and irreversibility.",
+    "finding_ids": [
+      "ISSUE-017",
+      "ISSUE-018",
+      "ISSUE-019",
+      "ISSUE-020",
+      "ISSUE-026"
+    ]
+  },
+  {
+    "chain_id": "CHAIN-006",
+    "compounded_severity": "critical",
+    "description": "Optional authentication, identity churn, and non-expiring principals combine into weak access and abuse containment.",
+    "finding_ids": [
+      "ISSUE-022",
+      "ISSUE-023",
+      "ISSUE-025"
+    ]
+  },
+  {
+    "chain_id": "CHAIN-007",
+    "compounded_severity": "high",
+    "description": "Retrieval/no-result defects are test-observed, while the default suite lacks a universal hermetic path boundary.",
+    "finding_ids": [
+      "ISSUE-013",
+      "ISSUE-029"
+    ]
+  }
+]

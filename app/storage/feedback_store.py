@@ -18,6 +18,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List, Optional
 
+from app.storage.at_rest import harden_file_permissions
+
 VALID_CATEGORIES = {"bug", "feature", "ui", "improvement", "other"}
 
 
@@ -55,6 +57,8 @@ class FeedbackStore:
         self._conn.executescript(_SCHEMA)
         self._conn.execute("PRAGMA journal_mode=WAL;")
         self._conn.commit()
+        for suffix in ("", "-wal", "-shm"):
+            harden_file_permissions(Path(str(self.db_path) + suffix))
 
     def submit(self, user_id: str, message: str, category: str = "other") -> FeedbackItem:
         category = (category or "other").lower().strip()
@@ -97,6 +101,17 @@ class FeedbackStore:
             else:
                 cur = self._conn.execute("SELECT COUNT(*) FROM feedback")
             return int(cur.fetchone()[0])
+
+    def purge_expired(self, *, cutoff: Optional[float]) -> int:
+        """Drop feedback older than the cutoff."""
+        if cutoff is None:
+            return 0
+        with self._lock:
+            removed = self._conn.execute(
+                "DELETE FROM feedback WHERE created_at < ?", (cutoff,)
+            ).rowcount
+            self._conn.commit()
+        return int(removed)
 
     def delete_user(self, user_id: str) -> None:
         with self._lock:

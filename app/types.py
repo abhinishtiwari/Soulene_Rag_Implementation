@@ -184,13 +184,22 @@ class ResponseStrategy:
 
 @dataclass
 class UserMemory:
-    """One long-term memory item for a user."""
+    """One long-term memory item with auditable source evidence."""
 
     text: str
     kind: str = "fact"          # name | preference | context | health | relationship
     created_at: float = 0.0
     updated_at: float = 0.0
     weight: float = 1.0
+    # A fact may be reinforced by multiple committed user messages. Legacy
+    # records have an empty list and are explicitly treated as unattributed.
+    sources: List[Dict[str, str]] = field(default_factory=list)
+    extraction_version: str = "legacy"
+    confidence: float = 1.0
+    # 0 = active. Non-zero marks a record held pending review because a deletion
+    # request could not prove it unrelated (ISSUE-018). Quarantined records are
+    # never retrieved into a prompt and expire under the memory retention window.
+    quarantined_at: float = 0.0
 
 
 @dataclass
@@ -234,7 +243,9 @@ class ChatResult:
     route: Route
     knowledge_type: KnowledgeType = KnowledgeType.NONE
     used_rag: bool = False
-    retrieved: List[RetrievedChunk] = field(default_factory=list)
+    # Source provenance for a knowledge-grounded reply: document id, display
+    # name and content version, so an answer can be attributed (ISSUE-016).
+    retrieved: List[Dict[str, object]] = field(default_factory=list)
     notes: List[str] = field(default_factory=list)
     safety_level: "SafetyLevel" = SafetyLevel.SAFE
     intent: "Intent" = Intent.SMALL_TALK

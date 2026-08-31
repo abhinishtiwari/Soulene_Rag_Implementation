@@ -1,0 +1,4 @@
+# Test-only dependencies. Exactly pinned, same rule as requirements.txt
+# (ISSUE-037), and deliberately NOT installed into the production image.
+-r requirements.txt
+pytest==9.1.1

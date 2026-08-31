@@ -1,0 +1,18 @@
+{
+    "schema_version":  "1.0",
+    "run_id":  "audit-20260826T200045765Z-6fe3c504",
+    "algorithm":  "SHA-256",
+    "manifest_format":  "JSON Lines UTF-8 without BOM",
+    "manifest_entry_count":  0,
+    "regular_file_count":  0,
+    "special_file_entry_count":  0,
+    "directory_count_including_root":  1,
+    "total_regular_file_bytes":  null,
+    "error_count":  29,
+    "canonical_collision_count":  0,
+    "escaping_reparse_count":  0,
+    "manifest_sha256":  null,
+    "manifest_bytes":  0,
+    "serialized_after_in_memory_capture":  true,
+    "source_contents_parsed":  false
+}

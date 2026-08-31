@@ -1,0 +1,8 @@
+[
+  "No live model, staging HTTP endpoint, package registry, advisory service, or Mongo replica set was contacted.",
+  "External provider behavior, retention, regional controls, production TLS/WAF/headers, backups, monitoring, and Mongo deployment semantics require external validation.",
+  "The 42 timed-out hardening tests have no native per-test result; they remain environment failures, not assumed product failures or passes.",
+  "Property 5 was interrupted once with ^C and exit code 1 without summary/counterexample and was not rerun.",
+  "Property 4's exact-case validator failure remains unresolved and forces fail-closed readiness.",
+  "Metadata/structure review intentionally did not reproduce live secrets, user records, or database contents."
+]

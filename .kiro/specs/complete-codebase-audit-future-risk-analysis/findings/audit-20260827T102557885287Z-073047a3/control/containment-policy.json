@@ -1,0 +1,9 @@
+{
+  "schema_version": "1.0",
+  "run_id": "audit-20260827T102557885287Z-073047a3",
+  "canonicalization": "root-bounded, Windows case-insensitive canonical relative paths",
+  "links": "links recorded and not followed",
+  "protected_scope": "every baseline file and baseline stable metadata",
+  "write_scope_before_reporting": "descendants only of .kiro/specs/complete-codebase-audit-future-risk-analysis/findings/audit-20260827T102557885287Z-073047a3/",
+  "command_policy": "potentially mutating commands require findings-local sandbox"
+}

@@ -1,0 +1,55 @@
+{
+  "audit_result_counts": {
+    "environment-failure": 42,
+    "inconclusive": 4,
+    "pass": 243,
+    "product-failure": 6,
+    "skipped-ineligible": 116
+  },
+  "catalog_total": 411,
+  "classification": {
+    "eligible_actual_test_cases": 295,
+    "ineligible_catalog_records": 116,
+    "terminal_accounting_total": 411
+  },
+  "execution": {
+    "bounded_command_count": 12,
+    "eligible_attempted_exactly_once": 295,
+    "eligible_attempted_more_than_once": 0,
+    "eligible_not_attempted": 0
+  },
+  "g5": {
+    "accounting_and_isolation_outcome": "pass",
+    "property_5_status": "failed-interrupted",
+    "property_5_result_ref": "validation/property-5/result.json"
+  },
+  "ineligible_breakdown": {
+    "actual_real_mongo_test_cases": 3,
+    "helper_or_fixture_support_records": 111,
+    "live_or_staging_script_records": 2
+  },
+  "integrity": {
+    "network_probe_passed": true,
+    "path_containment_ok": true,
+    "protected_files_checked_after": 470,
+    "protected_files_checked_before": 470,
+    "protected_mismatches_after": 0,
+    "protected_mismatches_before": 0
+  },
+  "native_result_counts": {
+    "error": 42,
+    "failed": 6,
+    "not-run": 116,
+    "passed": 247
+  },
+  "record_type": "task-6-final-reconciliation",
+  "run_id": "audit-20260827T102557885287Z-073047a3",
+  "schema_version": "1.0",
+  "synthesis_blockers": {
+    "property_validation_interruption": 1,
+    "repository_test_environment_failures": 42,
+    "repository_test_product_failures": 6,
+    "repository_test_total": 48
+  },
+  "validation_note": "Property 5 was invoked once but interrupted with ^C and exit code 1 before pytest emitted a summary or counterexample; it was not rerun under the one-shot policy."
+}

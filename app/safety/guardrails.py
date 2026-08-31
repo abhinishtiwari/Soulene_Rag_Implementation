@@ -294,6 +294,86 @@ class Guardrails:
         re.I,
     )
 
+    # ------------------------------------------------------------------
+    # Contextual disambiguation for self-harm wording (ISSUE-006).
+    #
+    # Deliberately narrow. Under-escalation is far more dangerous than
+    # over-escalation, so a construct is only treated as non-present when a
+    # tight template proves it: an explicit negated intent verb, a past-tense
+    # statement with a past marker, or a clearly non-first-person attribution.
+    # Anything else (including bare quotation, "I said ...", or a negation with
+    # an intervening verb such as "don't think I can stop myself from ...")
+    # keeps the conservative crisis route.
+    # ------------------------------------------------------------------
+    _SELF_HARM_ACTION = (
+        r"(?:kill(?:ing)?\s+my\s?self|end(?:ing)?\s+my\s+life"
+        r"|tak(?:e|ing)\s+my\s+(?:own\s+)?life|commit(?:ting)?\s+suicide|suicide"
+        r"|harm(?:ing)?\s+my\s?self|hurt(?:ing)?\s+my\s?self|cut(?:ting)?\s+my\s?self"
+        r"|unalive\s+my\s?self|hang(?:ing)?\s+my\s?self)"
+    )
+    # Negation must directly govern an intent verb, which then governs the action.
+    _NEGATED_SELF_HARM = re.compile(
+        r"\b(?:do not|don'?t|dont|did not|didn'?t|will not|won'?t|would not|wouldn'?t"
+        r"|am not|i'?m not|is not|isn'?t|no longer|never)\s+"
+        r"(?:really\s+|actually\s+|ever\s+)?"
+        r"(?:want|wanna|wanted|plan|planning|intend|intending|thinking about"
+        r"|thinking of|trying|going|gonna)\s+(?:to\s+)?(?:ever\s+)?" + _SELF_HARM_ACTION,
+        re.I,
+    )
+    _NEVER_SELF_HARM = re.compile(
+        r"\bwould\s+never\s+(?:ever\s+)?" + _SELF_HARM_ACTION, re.I)
+    # Past-tense statement plus an explicit past marker somewhere in the message.
+    _PAST_SELF_HARM = re.compile(
+        r"\b(?:used\s+to\s+want\s+to|used\s+to|wanted\s+to|tried\s+to|attempted\s+to)\s+"
+        + _SELF_HARM_ACTION,
+        re.I,
+    )
+    _PAST_MARKER = re.compile(
+        r"\b(?:used to|years? ago|months? ago|weeks? ago|back then|in the past|previously"
+        r"|when i was|as a (?:kid|child|teenager|teen)|last year|not any ?more|no longer"
+        r"|any ?more|since then|recovered|therapy helped|got better)\b",
+        re.I,
+    )
+    # Non-first-person attribution: someone else's words, not the user's intent.
+    _ATTRIBUTED_SELF_HARM = re.compile(
+        r"\b(?:he|she|they|him|her|them|my\s+\w+|someone|somebody|a\s+friend|the\s+\w+)\s+"
+        r"(?:said|says|told\s+me|telling\s+me|texted|wrote|posted|messaged|admitted)\b"
+        # The gap may quote a first-person wish, but must never cross a clause
+        # boundary into the user's own separate statement ("... but I want to ...").
+        r"(?:(?!\b(?:but|and|however|though|although|yet|still|also|plus)\b)[^.!?;]){0,80}?"
+        + _SELF_HARM_ACTION,
+        re.I,
+    )
+
+    def _defuse_self_harm_context(self, message: str) -> str:
+        """Blank out provably negated, historical or attributed constructs."""
+        text = message or ""
+        text = self._NEGATED_SELF_HARM.sub(" ", text)
+        text = self._NEVER_SELF_HARM.sub(" ", text)
+        text = self._ATTRIBUTED_SELF_HARM.sub(" ", text)
+        if self._PAST_MARKER.search(text):
+            text = self._PAST_SELF_HARM.sub(" ", text)
+        return text
+
+    def contextual_self_harm_only(self, message: str) -> bool:
+        """True when self-harm wording is present but provably not current intent.
+
+        Returns False whenever any acute wording survives defusing, so an
+        ambiguous or adversarial message keeps the deterministic crisis floor.
+        """
+        if not message:
+            return False
+        if not (self._match(self._self_harm, message)
+                or self._compact_match(self._COMPACT_SELF_HARM, message)):
+            return False
+        defused = self._defuse_self_harm_context(message)
+        if defused == message:
+            return False
+        # Spaced/obfuscated variants are never defused: evasion stays escalated.
+        return not (self._match(self._self_harm, defused)
+                    or self._compact_match(self._COMPACT_SELF_HARM, defused)
+                    or self._match(self._immediate_danger, defused))
+
     def _compact_match(self, pattern: re.Pattern, message: str) -> bool:
         """Match a whitespace-free signature. Catches ZWSP-split and spaced input."""
         if not message:
@@ -315,6 +395,13 @@ class Guardrails:
         # 1) CRISIS (highest priority)
         crisis = bool(self._self_harm.search(lowered) or self._immediate_danger.search(lowered))
         crisis = crisis or moderation.any_true("self_harm", "self_harm_intent", "self_harm_instructions")
+        # Provably negated/historical/attributed wording is not present intent.
+        # Moderation flags are independent evidence and are never defused.
+        if (crisis and not moderation.any_true(
+                "self_harm", "self_harm_intent", "self_harm_instructions")
+                and self.contextual_self_harm_only(message)):
+            crisis = False
+            notes.append("self_harm_context_not_current")
         if crisis:
             notes.append("crisis_detected")
             return SafetyDecision(Route.CRISIS, language, ResponseMode.EMOTIONAL,
@@ -372,12 +459,19 @@ class Guardrails:
         if self._match(self._abuse_victim, message):
             return SafetyLevel.ABUSE_OR_DANGER
 
+        moderation_self_harm = moderation.any_true(
+            "self_harm", "self_harm_intent", "self_harm_instructions")
         # Explicit self-harm BEFORE harm-to-others so "kill myself" isn't misread.
         explicit_self_harm = (
             self._match(self._self_harm, message)
             or self._compact_match(self._COMPACT_SELF_HARM, message)
-            or moderation.any_true("self_harm", "self_harm_intent", "self_harm_instructions")
+            or moderation_self_harm
         )
+        # A provably non-current disclosure still deserves attention, so it steps
+        # down to distress rather than being treated as ordinary conversation.
+        if (explicit_self_harm and not moderation_self_harm
+                and self.contextual_self_harm_only(message)):
+            return SafetyLevel.EMOTIONAL_DISTRESS
         if explicit_self_harm:
             if self._match(self._immediate_danger, message):
                 return SafetyLevel.IMMINENT_SELF_HARM
@@ -396,6 +490,46 @@ class Guardrails:
             return SafetyLevel.EMOTIONAL_DISTRESS
 
         return SafetyLevel.SAFE
+
+    # User-side signals of growing exclusive reliance on the assistant. One of
+    # these is unremarkable; a pattern across a conversation is the concern, so
+    # the count is what drives the relational boundary (see ChatbotService).
+    _DEPENDENCY_DISCLOSURE = re.compile(
+        r"\b(?:you(?:'re| are) (?:my )?(?:the )?only (?:one|friend|person)"
+        r"|you(?:'re| are) all i (?:have|need|got)"
+        r"|(?:i|i'?d) (?:would )?be (?:lost|nothing) without you"
+        r"|i (?:only|just) (?:talk|speak) to you"
+        r"|i don'?t need any ?one else"
+        r"|no one else (?:understands|listens to|cares about) me"
+        r"|i (?:trust|talk to) you more than (?:any ?one|my)"
+        r"|i (?:stopped|quit) (?:seeing|talking to) (?:my )?(?:therapist|friends|family)"
+        r"|i(?:'d| would) rather talk to you than)\b",
+        re.I,
+    )
+
+    def scrub_instruction_like(self, text: str) -> str:
+        """Remove instruction-like sentences from untrusted context.
+
+        Used for stored memory, summaries, prior-session digests and ingested
+        documents. Structural fencing tells the model a block is data; this
+        removes the directive so there is nothing to follow even if it does not.
+        """
+        kept_lines: List[str] = []
+        for line in (text or "").splitlines():
+            if not line.strip() or not self.is_injection(line):
+                kept_lines.append(line)
+                continue
+            # Drop only the offending sentence so legitimate context sharing the
+            # same line is not discarded with it.
+            sentences = [s for s in re.split(r"(?<=[.!?])\s+", line) if s.strip()]
+            surviving = [s for s in sentences if not self.is_injection(s)]
+            if surviving:
+                kept_lines.append(" ".join(surviving))
+        return "\n".join(kept_lines).strip()
+
+    def expresses_dependency(self, message: str) -> bool:
+        """True when the user signals exclusive reliance on the assistant."""
+        return self._match(self._DEPENDENCY_DISCLOSURE, message)
 
     def is_injection(self, message: str) -> bool:
         if self._match(self._prompt_extraction, message):

@@ -1,0 +1,18 @@
+{
+  "blocker_count": 48,
+  "catalog_total": 411,
+  "classified_total": 411,
+  "eligible_total": 295,
+  "executed_total": 295,
+  "gate": "G5",
+  "ineligible_total": 116,
+  "network_probe_passed": true,
+  "outcome": "pass",
+  "property_5_exit_code": 1,
+  "property_5_result_ref": "validation/property-5/result.json",
+  "property_5_status": "failed-interrupted",
+  "protected_integrity_ok": true,
+  "run_id": "audit-20260827T102557885287Z-073047a3",
+  "schema_version": "1.0",
+  "terminal_accounting_total": 411
+}

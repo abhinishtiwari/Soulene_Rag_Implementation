@@ -122,8 +122,14 @@ class LongTermMemory:
             storage_dir.mkdir(parents=True, exist_ok=True)
 
     # ------------------------------------------------------------------
-    def observe(self, user_id: str, message: str) -> None:
-        """Extract and persist stable facts from a user message (conservative)."""
+    def observe(
+        self, user_id: str, message: str, *,
+        source_session_id: Optional[str] = None,
+        source_message_id: Optional[str] = None,
+        extraction_version: str = "rules-v1",
+        confidence: float = 1.0,
+    ) -> None:
+        """Extract stable facts and retain committed-message provenance."""
         candidates: List[UserMemory] = []
         now = time.time()
 
@@ -160,6 +166,13 @@ class LongTermMemory:
                                                  updated_at=now, weight=weight))
         if not candidates:
             return
+        source = None
+        if source_session_id and source_message_id:
+            source = {"session_id": source_session_id, "message_id": source_message_id}
+        for candidate in candidates:
+            candidate.sources = [source] if source else []
+            candidate.extraction_version = extraction_version
+            candidate.confidence = max(0.0, min(1.0, float(confidence)))
 
         with self._lock:
             mem = self._load(user_id)
@@ -171,9 +184,11 @@ class LongTermMemory:
             self._store[user_id] = mem
             self._persist(user_id, mem)
 
-    def retrieve(self, user_id: str, message: str, k_min: int = 3, k_max: int = 8) -> List[UserMemory]:
+    def retrieve(self, user_id: str, message: str, k_min: int = 3,
+                 k_max: int = 8) -> List[UserMemory]:
         with self._lock:
-            mem = list(self._load(user_id))
+            # Quarantined records must never reach a prompt.
+            mem = [m for m in self._load(user_id) if not m.quarantined_at]
         if not mem:
             return []
         q = _tokens(message)
@@ -219,7 +234,7 @@ class LongTermMemory:
         if not _NEGATION.search(message):
             return []
         with self._lock:
-            mem = list(self._load(user_id))
+            mem = [m for m in self._load(user_id) if not m.quarantined_at]
         q = _tokens(message)
         hits = []
         for item in mem:
@@ -238,6 +253,37 @@ class LongTermMemory:
                     except OSError:
                         pass
 
+    def forget_session(self, user_id: str, session_id: str) -> Dict[str, int]:
+        """Delete this session's evidence and quarantine what cannot be proven.
+
+        Same contract as the SQLite/Mongo stores: removed / quarantined /
+        retained, with unattributed records quarantined rather than kept in use.
+        """
+        now = time.time()
+        outcome = {"removed": 0, "quarantined": 0, "retained": 0}
+        with self._lock:
+            memories = self._load(user_id)
+            keep = []
+            for memory in memories:
+                if not memory.sources:  # unattributed: cannot be proven unrelated
+                    if not memory.quarantined_at:
+                        memory.quarantined_at = now
+                    outcome["quarantined"] += 1
+                    keep.append(memory)
+                    continue
+                memory.sources = [
+                    source for source in memory.sources
+                    if source.get("session_id") != session_id
+                ]
+                if memory.sources:
+                    outcome["retained"] += 1
+                    keep.append(memory)
+                else:
+                    outcome["removed"] += 1
+            self._store[user_id] = keep
+            self._persist(user_id, keep)
+        return outcome
+
     # ------------------------------------------------------------------
     def _upsert(self, mem: List[UserMemory], cand: UserMemory) -> None:
         cand_tokens = _tokens(cand.text)
@@ -247,6 +293,11 @@ class LongTermMemory:
                 existing.text = cand.text
                 existing.updated_at = cand.updated_at
                 existing.weight = min(3.0, existing.weight + 0.2)
+                for source in cand.sources:
+                    if source not in existing.sources:
+                        existing.sources.append(source)
+                existing.extraction_version = cand.extraction_version
+                existing.confidence = max(existing.confidence, cand.confidence)
                 return
         mem.append(cand)
 

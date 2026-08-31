@@ -3,3 +3,8 @@ __pycache__/
 *.pyc
 data/
 cache/
+
+# ISSUE-033: generated diagnostic output. Never commit it — a stale results file
+# in the tree gets mistaken for current test evidence. The authoritative run is
+# `python -m pytest -q tests --ignore=tests/test_mongo_integration.py`.
+context_audit_results.json

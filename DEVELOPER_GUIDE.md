@@ -273,7 +273,7 @@ SSE frames: `data: {"delta":"..."}` … terminated by `data: [DONE]`.
 
 1. Push the repo to GitHub.
 2. Render → **New → Blueprint** → select the repo.
-3. Set the one secret: **`OPENAI_API_KEY`** (marked `sync: false`).
+3. Set **`OPENAI_API_KEY`**, **`API_KEY`**, and a distinct **`ADMIN_API_KEY`** (all marked `sync: false`). Production startup fails closed if either boundary key is absent.
 4. Deploy.
 
 Details already configured: Python 3.12.7, `pip install -r requirements.txt`,
@@ -296,23 +296,35 @@ build it automatically.
 | `OPENAI_MODEL` | `gpt-4.1-mini` | generation model |
 | `OPENAI_MODERATION_MODEL` | `omni-moderation-latest` | input moderation |
 | `ENABLE_INPUT_MODERATION` | `true` | moderation pass on input |
-| `ENABLE_OUTPUT_SAFETY_CHECK` | `false` | optional 2nd LLM reviewer (deterministic validator always runs) |
+| `ENABLE_OUTPUT_SAFETY_CHECK` | `true` | second-pass output editor; deterministic therapeutic-harm validation still runs |
 | `KNOWLEDGE_TOKEN_BUDGET` | `12000` | full-preload threshold |
 | `CONTEXT_CACHE_SIZE` | `100` | messages cached per conversation |
 | `PROMPT_WINDOW` | `20` | messages sent to the model |
 | `RESPONSE_CACHE_ENTRIES` | `500` | cached factual answers |
 | `MAX_UPLOAD_MB` | `10` | upload limit |
+| `REQUIRE_ENCRYPTED_STORAGE` | `false` | production `true`: startup fails without an attestation |
+| `STORAGE_ENCRYPTION_ATTESTED` | *(empty)* | who verified disk/DB/backup encryption, and when |
+| `RETENTION_ENABLED` | `false` | master switch for expiry; off = retain indefinitely |
+| `RETAIN_CONVERSATION_DAYS` | `365` | raw transcript window (`0` = never expire) |
+| `RETAIN_SUMMARY_DAYS` | `90` | rolling summary / derived recap window |
+| `RETAIN_SAFETY_STATE_DAYS` | `30` | inferred safety state window |
+| `RETAIN_MEMORY_DAYS` | `180` | derived long-term memory window |
+| `RETAIN_FEEDBACK_DAYS` | `730` | product feedback window |
+| `RETENTION_INTERVAL_HOURS` | `24` | minimum gap between sweeps (one worker claims each) |
 | `EMERGENCY_NUMBER` | `112` | crisis referral (authoritative — never model-generated) |
+| `EMERGENCY_LOCALE` | *(empty)* | human-verified locale for the number above; empty ⇒ neutral "local emergency services" wording |
 | `STRICT_UNSAFE_THRESHOLD` | `3` | unsafe attempts before tone hardens |
-| `API_KEY` | *(empty)* | client auth; empty = auth disabled |
-| `ADMIN_API_KEY` | *(empty)* | required for `/documents` write operations |
+| `REQUIRE_API_AUTH` | `false` | set `true` in production to require separate client/admin keys at startup |
+| `API_KEY` | *(empty)* | client auth; required when production auth is enabled |
+| `ADMIN_API_KEY` | *(empty)* | distinct key required for `/documents` write operations |
 | `RATE_LIMIT_PER_MINUTE` | `0` | per-caller limit; `0` = unlimited |
 | `LOG_LEVEL` | `INFO` | logging |
 
 ### Securing the deployment
 
-Auth and rate limiting are **off by default** so local development is frictionless. Before
-exposing the service publicly, set `API_KEY` and `ADMIN_API_KEY`:
+Auth and rate limiting are off by default only for explicit local development. Public
+or production deployments must set `REQUIRE_API_AUTH=true`, `API_KEY`, and a distinct
+`ADMIN_API_KEY`; startup refuses an incomplete configuration:
 
 ```bash
 curl -X POST https://<app>/chat \
@@ -330,10 +342,35 @@ The limiter is per worker process, so the effective global limit is
 
 ## 11. Testing strategy
 
+### Entry points (ISSUE-033)
+
+`tests/lanes.py` is the manifest of every test and diagnostic entry point, and
+`tests/test_entry_points.py` enforces it: a new root-level script fails the suite
+until it is classified, and the CI gate cannot disagree with the manifest.
+
+**One authoritative command.** Anything presented as current test evidence comes
+from this and nothing else:
+
 ```bash
-python -m unittest discover -s tests -p "test_*.py"    # 134 tests, ~3s, no network
-python -m tests.smoke_live                              # live API validation
+python -m pytest -q tests --ignore=tests/test_mongo_integration.py
 ```
+
+| Lane | Entry | Gates a release? | Notes |
+|---|---|---|---|
+| `suite` | `tests` | **yes** | Hermetic (`tests/conftest.py` sandboxes every writable path). Run by `.github/workflows/gate.yml`. |
+| `mongo-integration` | `tests/test_mongo_integration.py` | no | Needs a live replica set; skips when unreachable (ISSUE-032). |
+| `safety-diagnostic` | `test_all.py` | no | `python test_all.py` — readable safety walkthrough. Sandboxed at import. |
+| `pipeline-diagnostic` | `test_audit.py` | no | `python test_audit.py` — readable pipeline walkthrough. Sandboxed at import. |
+| `live-context-audit` | `context_audit.py` | no | Needs a running server; requires `SOULENE_ALLOW_LIVE_AUDIT=1`. |
+| `smoke-live` | `tests/smoke_live.py` | no | Real provider calls; requires `SOULENE_ALLOW_LIVE_SMOKE=1`. |
+| `smoke-staging` | `tests/smoke_staging.py` | no | Staging gate, same opt-in. |
+| `cache-build` | `build_cache.py` | no | Operator tool; writing the repository cache is its purpose, so it is deliberately not sandboxed. |
+
+Every non-hermetic lane refuses to run without an explicit opt-in, so no lane
+can quietly spend provider budget or write the working repository. `Test_Report.md`
+is a historical record and says so in its own header; do not quote it as current.
+
+### What the suite covers
 
 | Suite | Covers |
 |---|---|
@@ -345,14 +382,16 @@ python -m tests.smoke_live                              # live API validation
 | `test_spec_compliance.py` | six emotional states, grief/trauma humour lock, deflection variety, rolling summary continuity, auth + rate limiting |
 | `test_hardening.py` | Unicode/leet/spacing evasion, multi-language injection, oversized input, real DOCX round-trip, document QA accuracy, spam, concurrency/load, recovery |
 
-Live checks (cost tokens, not in the automated suite):
+Live checks (cost tokens, write the real `data/`, not in the automated suite):
 
 ```bash
-python -m tests.smoke_live      # conversational behaviour
-python -m tests.smoke_staging   # staging gate: 11 hardening assertions end-to-end
+SOULENE_ALLOW_LIVE_SMOKE=1 python -m tests.smoke_live      # conversational behaviour
+SOULENE_ALLOW_LIVE_SMOKE=1 python -m tests.smoke_staging   # staging gate, end-to-end
 ```
 
-Tests use `tests/fake_llm.py` — deterministic, no network, no embeddings.
+Tests use `tests/fake_llm.py` — deterministic, no network, no embeddings. Its
+`generations` property counts reply-producing calls only, so cost assertions do
+not depend on whether the output reviewer is enabled (ISSUE-040).
 
 ---
 
@@ -369,12 +408,13 @@ Tests use `tests/fake_llm.py` — deterministic, no network, no embeddings.
 | Disguised self-harm | Indirect phrasing detected ("no point anymore", "better off without me"); crisis outranks injection handling |
 | Domain escape | Analyzer flags off-topic **and** a deterministic validator strips technical answers; off-topic never streamed unvalidated |
 | Hallucinated facts | Missing knowledge produces an explicit "not available — don't guess" instruction; cache invalidated when documents change |
+| Incomplete session deletion | `DELETE /sessions/<id>` returns `derived_memory: {removed, quarantined, retained, quarantined_still_stored}`. `quarantined` records are **not** deleted: they are excluded from every future response and expire on the memory retention window. `quarantined_still_stored` states this explicitly. Account deletion removes them unconditionally. |
 | Path traversal on upload | `Path(filename).name`, sanitised `knowledge_type`, extension allow-list, size cap |
 | Error/secret leakage | Handlers log exception *types* only; users get generic messages; no stack traces or message bodies logged |
-| Unauthenticated access | Optional shared-key auth (`API_KEY`); constant-time comparison; `/health` and `/` intentionally open |
+| Unauthenticated access | Production sets `REQUIRE_API_AUTH=true`; startup requires separate client/admin keys; `/health` and `/` intentionally remain open |
 | Knowledge-cache poisoning by a client | `/documents` writes require a separate `ADMIN_API_KEY` |
 | Abuse / cost blowout | Per-caller sliding-window rate limiter (`RATE_LIMIT_PER_MINUTE`) |
-| Wrong emergency number | Helpline replies are deterministic; foreign hotline patterns rewritten to `EMERGENCY_NUMBER` |
+| Wrong emergency number | Helpline replies are deterministic; a number is named only when `EMERGENCY_LOCALE` declares it human-verified, otherwise neutral wording is used; invented foreign hotlines are rewritten |
 | **Unicode / homoglyph / leetspeak evasion** | `app/normalize.py` folds NFKC, strips zero-width & bidi controls, maps Cyrillic/Greek confusables, folds leetspeak, rejoins spaced letters. Every detector checks raw **and** normalized text |
 | **Spaced-out payloads** (`i g n o r e ...`) | `despace()` + compact whitespace-free signatures |
 | **Multi-language injection** (Hindi/Hinglish) | `_jailbreak_native` patterns |
@@ -473,7 +513,7 @@ These behaviours were carried across; the rest was intentionally left behind.
 - **`_lookup_stored_answer`** (verbatim replay of a previous answer) — superseded by the scoped response cache, which never replays emotional replies.
 - **The forced five-option distress menu** — contradicted "keep replies short" and appeared in three conflicting versions across `BASE_SYSTEM_PROMPT`, `build_model_input` and the two reviewer prompts. Now the five pathways are *available strategies*, not a mandatory script.
 - **`core/p.py`** (byte-identical duplicate of `prompts.py`) and **`core/poooromptCopiii.py`** (100% commented out) — provably dead; verified by diff.
-- **Counter-AI reviewer** — merged into one optional reviewer plus the always-on deterministic validator (see §12).
+- **Counter-AI reviewer** — merged into one defense-in-depth editor plus the always-on deterministic therapeutic-harm validator (see §12).
 
 ## 14. Future extension points
 

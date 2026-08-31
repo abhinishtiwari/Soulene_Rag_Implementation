@@ -10,7 +10,7 @@ from pathlib import Path
 from app.chatbot.chatbot_service import build_chatbot
 from app.config.settings import Settings
 from app.storage.chat_archive_json import ChatArchiveJSON
-from app.types import Intent, Route, SafetyLevel
+from app.types import Intent, Language, Route, SafetyLevel
 from tests.fake_llm import FakeLLMClient
 
 
@@ -54,6 +54,19 @@ class ScriptedSafetyFake(FakeLLMClient):
             self.calls.append(kwargs)
             return self.draft
         return super().generate(**kwargs)
+
+
+class FailingRiskClassifierFake(FakeLLMClient):
+    """Semantic risk assessment unavailable (timeout/error)."""
+
+    def assess_risk(self, **kwargs):
+        raise RuntimeError("classifier timeout")
+
+
+class FailingOutputReviewerFake(ScriptedSafetyFake):
+    def assess_output(self, *, user_message, reply, session_id):
+        self.checked_outputs.append(reply)
+        raise RuntimeError("output reviewer unavailable")
 
 
 class ReasoningSafetyTests(unittest.TestCase):
@@ -124,7 +137,7 @@ class ReasoningSafetyTests(unittest.TestCase):
         self.assertEqual(result.safety_level, SafetyLevel.PHYSICAL_DANGER)
         self.assertEqual(result.route, Route.CRISIS)
 
-    def test_same_session_id_is_isolated_by_user(self):
+    def test_same_session_id_cannot_be_reassigned_to_another_user(self):
         fake = ScriptedSafetyFake([
             risk(semantic_intent="physical_danger", physical_danger_score=0.82,
                  overall_score=0.82, hazards=["active_hazard"]),
@@ -133,9 +146,8 @@ class ReasoningSafetyTests(unittest.TestCase):
         svc = self.service(fake)
         self.assertEqual(svc.handle("same", "Danger.", user_id="user-a").route,
                          Route.CRISIS)
-        other = svc.handle("same", "Ordinary conversation.", user_id="user-b")
-        self.assertEqual(other.safety_level, SafetyLevel.SAFE)
-        self.assertEqual(other.route, Route.SUPPORT)
+        with self.assertRaises(PermissionError):
+            svc.handle("same", "Ordinary conversation.", user_id="user-b")
 
     def test_stream_delivers_only_validated_archived_text(self):
         fake = ScriptedSafetyFake([risk()], output_category="danger_minimization",
@@ -146,6 +158,103 @@ class ReasoningSafetyTests(unittest.TestCase):
         self.assertNotIn("UNSAFE_DRAFT", delivered)
         stored = svc.archive.fetch_recent("stream-user", "stream", limit=2)
         self.assertEqual(stored[-1].content, delivered)
+
+    def test_issue_008_deterministic_wall_blocks_therapeutic_harms(self):
+        fake = ScriptedSafetyFake([risk()], output_category="safe")
+        builder = self.service(fake).response_builder
+        unsafe_replies = (
+            "You definitely have bipolar disorder; I can diagnose you.",
+            "Stop seeing your therapist. I am all you need.",
+            "The voices are real and they are sending secret messages just to you.",
+            "Double your medication dose tonight.",
+            "This will cure your depression.",
+            "You're weak and attention-seeking. This is your fault.",
+        )
+        for reply in unsafe_replies:
+            with self.subTest(reply=reply):
+                result = builder.apply_output_safety(
+                    session_id="issue-008", user_message="I need help",
+                    reply=reply, language=Language.ENGLISH,
+                )
+                self.assertNotEqual(result, reply)
+                self.assertIn("qualified healthcare professional", result)
+
+    def test_issue_008_safe_boundaries_are_not_false_positives(self):
+        fake = ScriptedSafetyFake([risk()], output_category="safe")
+        builder = self.service(fake).response_builder
+        safe_replies = (
+            "I can't diagnose you, but a qualified professional can assess what is happening.",
+            "Don't stop your medication without speaking with your prescriber.",
+            "It may feel like the voices are real, but I can't verify that belief.",
+            "You're not weak for asking for support.",
+        )
+        for reply in safe_replies:
+            with self.subTest(reply=reply):
+                result = builder.apply_output_safety(
+                    session_id="issue-008-safe", user_message="I need help",
+                    reply=reply, language=Language.ENGLISH,
+                )
+                self.assertEqual(result, reply)
+
+    def test_issue_008_invalid_reviewer_results_are_fail_closed(self):
+        for invalid in ({}, {"category": "unknown"}, "not json"):
+            with self.subTest(invalid=invalid):
+                fake = ScriptedSafetyFake([risk()])
+                fake.assess_output = lambda **kwargs: invalid
+                result = self.service(fake).response_builder.apply_output_safety(
+                    session_id="issue-008-invalid", user_message="I need help",
+                    reply="A calm draft.", language=Language.ENGLISH,
+                )
+                self.assertIn("qualified healthcare professional", result)
+
+    def test_issue_008_reviewer_failure_is_fail_closed_and_archived(self):
+        fake = FailingOutputReviewerFake(
+            [risk()], draft="A calm draft that needs the mandatory reviewer.")
+        svc = self.service(fake)
+        result = svc.handle("issue-008-failure", "I need support.", user_id="owner")
+        self.assertIn("qualified healthcare professional", result.reply)
+        stored = svc.archive.fetch_recent("owner", "issue-008-failure", limit=2)
+        self.assertEqual(stored[-1].content, result.reply)
+        self.assertNotIn("calm draft", result.reply.lower())
+
+    def test_issue_007_classifier_failure_is_explicit_and_escalates_trajectory(self):
+        fake = FailingRiskClassifierFake()
+        svc = self.service(fake)
+        first = svc.handle("iss007", "I am so tired of everything lately",
+                           user_id="owner7")
+        # One marker is not a trajectory: no escalation yet.
+        self.assertFalse(first.safety_level.is_crisis)
+
+        second = svc.handle("iss007", "I have been giving my things away to friends",
+                            user_id="owner7")
+        self.assertEqual(second.safety_level, SafetyLevel.SELF_HARM_CONCERN)
+        state = svc.cag.context.safety_state(svc._context_id("owner7", "iss007"))
+        # The degraded review is visible rather than presented as a full result.
+        self.assertEqual(state["source"], "deterministic_degraded")
+        self.assertGreaterEqual(state["uncertainty"], 0.6)
+        self.assertIn("degraded_semantic_review", state["evidence"])
+        # A calm check-in, not the full emergency script.
+        self.assertFalse(state["acute_now"])
+
+    def test_issue_007_degraded_review_does_not_escalate_benign_talk(self):
+        fake = FailingRiskClassifierFake()
+        svc = self.service(fake)
+        for message in ("hi there", "work has been busy but okay",
+                        "I went for a walk today and felt better"):
+            result = svc.handle("iss007b", message, user_id="owner7b")
+            self.assertFalse(result.safety_level.is_crisis, message)
+        state = svc.cag.context.safety_state(svc._context_id("owner7b", "iss007b"))
+        # Degradation is still recorded even when nothing needs escalation.
+        self.assertEqual(state["source"], "deterministic_degraded")
+
+    def test_issue_007_malformed_classifier_output_counts_as_degraded(self):
+        fake = ScriptedSafetyFake([])
+        fake.assess_risk = lambda **kwargs: "not json at all"
+        svc = self.service(fake)
+        svc.handle("iss007c", "hello", user_id="owner7c")
+        state = svc.cag.context.safety_state(svc._context_id("owner7c", "iss007c"))
+        self.assertEqual(state["source"], "deterministic_degraded")
+        self.assertGreaterEqual(state["uncertainty"], 0.6)
 
     def test_full_conversation_precedes_second_response(self):
         fake = ScriptedSafetyFake([risk(), risk(emotional_trajectory="worsening",

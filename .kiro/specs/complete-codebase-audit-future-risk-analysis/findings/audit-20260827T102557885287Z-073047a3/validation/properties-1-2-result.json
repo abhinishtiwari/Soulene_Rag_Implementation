@@ -1,0 +1,8 @@
+{
+  "framework": "deterministic-generated fallback",
+  "examples_per_property": 240,
+  "properties": {
+    "1": "passed",
+    "2": "passed"
+  }
+}

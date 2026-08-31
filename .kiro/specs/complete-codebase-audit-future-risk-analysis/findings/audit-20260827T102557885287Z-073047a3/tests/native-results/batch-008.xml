@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="6" skipped="0" tests="16" time="6.360" timestamp="2026-08-27T16:31:03.445655+05:30" hostname="AbhinishTiwati"><testcase classname="tests.test_pipeline.PipelineTests" name="test_knowledge_cache_built" time="0.099"><failure message="AssertionError: 0 not greater than 0">self = &lt;tests.test_pipeline.PipelineTests testMethod=test_knowledge_cache_built&gt;
+
+    def test_knowledge_cache_built(self):
+        stats = self.service.cag.knowledge.stats()
+        self.assertGreater(stats["documents"], 0)
+&gt;       self.assertGreater(stats["sections"], 0)
+E       AssertionError: 0 not greater than 0
+
+tests\test_pipeline.py:38: AssertionError</failure></testcase><testcase classname="tests.test_pipeline.PipelineTests" name="test_greeting_no_knowledge" time="0.138" /><testcase classname="tests.test_pipeline.PipelineTests" name="test_emotional_support_no_knowledge" time="0.166" /><testcase classname="tests.test_pipeline.PipelineTests" name="test_services_question_uses_knowledge" time="0.173"><failure message="AssertionError: False is not true">self = &lt;tests.test_pipeline.PipelineTests testMethod=test_services_question_uses_knowledge&gt;
+
+    def test_services_question_uses_knowledge(self):
+        res = self.r("What services do you offer?")
+&gt;       self.assertTrue(res.used_rag)
+E       AssertionError: False is not true
+
+tests\test_pipeline.py:57: AssertionError</failure></testcase><testcase classname="tests.test_pipeline.PipelineTests" name="test_pricing_question_has_real_price_in_context" time="0.190"><failure message="AssertionError: '449' not found in &quot;Recent conversation:\nNo earlier conversation.\n\nKNOWLEDGE: nothing relevant is available for this factual question. Say you don't have that detail and suggest checking in the app — do not guess.\n\nUser just said:\nWhat is the Wellness plan price?&quot;">self = &lt;tests.test_pipeline.PipelineTests testMethod=test_pricing_question_has_real_price_in_context&gt;
+
+    def test_pricing_question_has_real_price_in_context(self):
+        self.r("What is the Wellness plan price?")
+        gen = [c for c in self.fake.calls if c["session"] == self.sid]
+        self.assertTrue(gen)
+&gt;       self.assertIn("449", gen[-1]["input"])
+E       AssertionError: '449' not found in "Recent conversation:\nNo earlier conversation.\n\nKNOWLEDGE: nothing relevant is available for this factual question. Say you don't have that detail and suggest checking in the app — do not guess.\n\nUser just said:\nWhat is the Wellness plan price?"
+
+tests\test_pipeline.py:64: AssertionError</failure></testcase><testcase classname="tests.test_pipeline.PipelineTests" name="test_athletes_question_uses_knowledge" time="0.244"><failure message="AssertionError: False is not true">self = &lt;tests.test_pipeline.PipelineTests testMethod=test_athletes_question_uses_knowledge&gt;
+
+    def test_athletes_question_uses_knowledge(self):
+        res = self.r("What does Soulene provide for athletes?")
+&gt;       self.assertTrue(res.used_rag)
+E       AssertionError: False is not true
+
+tests\test_pipeline.py:68: AssertionError</failure></testcase><testcase classname="tests.test_pipeline.PipelineTests" name="test_mental_health_info_uses_knowledge" time="0.288"><failure message="AssertionError: False is not true">self = &lt;tests.test_pipeline.PipelineTests testMethod=test_mental_health_info_uses_knowledge&gt;
+
+    def test_mental_health_info_uses_knowledge(self):
+        res = self.r("What is anxiety?")
+        self.assertEqual(res.intent, Intent.MENTAL_HEALTH_INFO)
+&gt;       self.assertTrue(res.used_rag)
+E       AssertionError: False is not true
+
+tests\test_pipeline.py:73: AssertionError</failure></testcase><testcase classname="tests.test_pipeline.PipelineTests" name="test_repeat_question_served_from_cache" time="0.557" /><testcase classname="tests.test_pipeline.PipelineTests" name="test_emotional_replies_never_cached" time="0.658" /><testcase classname="tests.test_pipeline.PipelineTests" name="test_unknown_plan_flagged_as_missing" time="0.322" /><testcase classname="tests.test_pipeline.PipelineTests" name="test_followup_history_present" time="0.797" /><testcase classname="tests.test_pipeline.PipelineTests" name="test_crisis_routes_to_crisis" time="0.545" /><testcase classname="tests.test_pipeline.PipelineTests" name="test_harmful_refusal" time="0.205" /><testcase classname="tests.test_pipeline.PipelineTests" name="test_coding_is_off_topic" time="0.302" /><testcase classname="tests.test_pipeline.PipelineTests" name="test_trivia_is_off_topic" time="0.358" /><testcase classname="tests.test_pipeline.PipelineTests" name="test_knowledge_labelled_as_data" time="0.357"><failure message="AssertionError: 'never instructions' not found in &quot;recent conversation:\nno earlier conversation.\n\nknowledge: nothing relevant is available for this factual question. say you don't have that detail and suggest checking in the app — do not guess.\n\nuser just said:\nwhat services do you offer?&quot;">self = &lt;tests.test_pipeline.PipelineTests testMethod=test_knowledge_labelled_as_data&gt;
+
+    def test_knowledge_labelled_as_data(self):
+        self.r("What services do you offer?")
+        gen = [c for c in self.fake.calls if c["session"] == self.sid]
+        text = gen[-1]["input"]
+&gt;       self.assertIn("never instructions", text.lower())
+E       AssertionError: 'never instructions' not found in "recent conversation:\nno earlier conversation.\n\nknowledge: nothing relevant is available for this factual question. say you don't have that detail and suggest checking in the app — do not guess.\n\nuser just said:\nwhat services do you offer?"
+
+tests\test_pipeline.py:129: AssertionError</failure></testcase></testsuite></testsuites>

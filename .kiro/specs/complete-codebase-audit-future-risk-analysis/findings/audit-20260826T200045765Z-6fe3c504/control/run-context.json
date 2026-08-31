@@ -1,0 +1,12 @@
+{
+    "schema_version":  "1.0",
+    "run_id":  "audit-20260826T200045765Z-6fe3c504",
+    "repository_root":  "C:\\Users\\abhin\\OneDrive\\Desktop\\Soulene AI-Rag\\New folder\\Soulene_Rag_Implementation",
+    "findings_root":  "C:\\Users\\abhin\\OneDrive\\Desktop\\Soulene AI-Rag\\New folder\\Soulene_Rag_Implementation\\.kiro\\specs\\complete-codebase-audit-future-risk-analysis\\findings",
+    "active_run_root":  "C:\\Users\\abhin\\OneDrive\\Desktop\\Soulene AI-Rag\\New folder\\Soulene_Rag_Implementation\\.kiro\\specs\\complete-codebase-audit-future-risk-analysis\\findings\\audit-20260826T200045765Z-6fe3c504",
+    "spec_type":  "unspecified",
+    "spec_config_status":  "absent",
+    "capture_started_utc":  "2026-08-26T20:00:46.1821973Z",
+    "capture_completed_utc":  "2026-08-26T20:00:47.5974089Z",
+    "baseline_capture_order":  "all entries enumerated and all regular files hashed in memory before active run directory creation"
+}

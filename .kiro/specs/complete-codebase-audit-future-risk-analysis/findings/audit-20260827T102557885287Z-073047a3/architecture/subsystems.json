@@ -1,0 +1,156 @@
+{
+  "application-flow": {
+    "downstream": [
+      "model",
+      "archive",
+      "UI"
+    ],
+    "files": [
+      "main.py",
+      "ui/index.html",
+      "app/chatbot/*",
+      "app/normalize.py",
+      "app/types.py",
+      "app/utils.py",
+      "app/llm/client.py",
+      "app/config/settings.py"
+    ],
+    "interfaces": [
+      "Flask routes",
+      "ChatbotService.handle",
+      "LLMClient.generate"
+    ],
+    "upstream": [
+      "browser",
+      "CLI"
+    ]
+  },
+  "deployment-operations": {
+    "downstream": [
+      "workers",
+      "mounts",
+      "external services"
+    ],
+    "files": [
+      "render.yaml",
+      "Procfile",
+      "requirements.txt",
+      "README.md",
+      "DEVELOPER_GUIDE.md"
+    ],
+    "interfaces": [
+      "Gunicorn",
+      "Render",
+      "dependency install"
+    ],
+    "upstream": [
+      "deployment config"
+    ]
+  },
+  "memory-rag-cag": {
+    "downstream": [
+      "model context",
+      "cache answer",
+      "derived memory"
+    ],
+    "files": [
+      "app/cag/*",
+      "app/memory/*",
+      "knowledge/*",
+      "cache/*",
+      "build_cache.py"
+    ],
+    "interfaces": [
+      "CAGEngine",
+      "KnowledgeCache",
+      "ContextCache",
+      "LongTermMemory*"
+    ],
+    "upstream": [
+      "documents",
+      "committed turns"
+    ]
+  },
+  "persistence": {
+    "downstream": [
+      "SQLite",
+      "MongoDB",
+      "session/account reads"
+    ],
+    "files": [
+      "app/storage/*",
+      "data/*"
+    ],
+    "interfaces": [
+      "ChatArchive*",
+      "FeedbackStore*",
+      "get_mongo_db"
+    ],
+    "upstream": [
+      "HTTP/chat pipeline"
+    ]
+  },
+  "safety": {
+    "downstream": [
+      "route",
+      "final reply",
+      "persisted safety state"
+    ],
+    "files": [
+      "app/safety/*",
+      "app/prompts/*"
+    ],
+    "interfaces": [
+      "Guardrails",
+      "ConversationRiskReasoner",
+      "CrisisHandler",
+      "ResponseBuilder"
+    ],
+    "upstream": [
+      "normalized message",
+      "history",
+      "moderation"
+    ]
+  },
+  "security-privacy": {
+    "downstream": [
+      "principal",
+      "authorization",
+      "cookies"
+    ],
+    "files": [
+      "app/security.py",
+      "app/identity.py",
+      ".env*",
+      ".git/*"
+    ],
+    "interfaces": [
+      "IdentityManager",
+      "ApiAuth",
+      "RateLimiter"
+    ],
+    "upstream": [
+      "untrusted HTTP"
+    ]
+  },
+  "testing-quality": {
+    "downstream": [
+      "test evidence"
+    ],
+    "files": [
+      "tests/*",
+      "test_all.py",
+      "test_audit.py",
+      "context_audit.py",
+      "pytest.ini"
+    ],
+    "interfaces": [
+      "pytest",
+      "unittest",
+      "script mains"
+    ],
+    "upstream": [
+      "baseline code"
+    ]
+  }
+}

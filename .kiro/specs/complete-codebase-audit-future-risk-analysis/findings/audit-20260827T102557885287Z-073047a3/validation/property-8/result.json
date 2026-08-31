@@ -1,0 +1,12 @@
+{
+  "counterexample": null,
+  "examples": 240,
+  "exit_code": 0,
+  "framework": "pytest deterministic generated-input property harness (Hypothesis unavailable; no network installation permitted)",
+  "output_summary": "1 passed in 0.06s",
+  "property": "Property 8: Temporal classification is singular, evidence-supported, and consistently partitioned",
+  "run_id": "audit-20260827T102557885287Z-073047a3",
+  "schema_version": "1.0",
+  "status": "passed",
+  "task": "8.2 Write the property test for temporal classification and report partitioning"
+}

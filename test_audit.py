@@ -6,6 +6,9 @@ Tests:
 
 Run:
   python test_audit.py
+
+Lane `pipeline-diagnostic` in `tests/lanes.py`: a human-readable walkthrough, not
+gating evidence.
 """
 from __future__ import annotations
 
@@ -13,8 +16,20 @@ import sys
 import os
 import time
 
+# ISSUE-033: cp1252 consoles cannot encode the arrows/check marks this script
+# prints, which made it exit non-zero mid-report on Windows.
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(errors="replace")  # keep the console encoding
+
 # Ensure project root is on path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+# ISSUE-033: this script builds a real ChatbotService, so without a sandbox it
+# writes the working repository's `data/chat_archive.sqlite3`. Bind a temporary
+# project root before any Settings instance exists.
+from tests.sandbox import activate_sandbox
+
+activate_sandbox("soulene-diagnostic-")
 
 from app.config.settings import Settings
 from app.chatbot.chatbot_service import build_chatbot, ChatbotService
@@ -330,7 +345,9 @@ def test_security():
 
     # Check that poisoned memories don't contain instruction-like content
     # that could override system behavior
-    all_mem = svc_poison.profile._load(user_p)
+    all_mem = svc_poison.profile.retrieve(
+        user_p, "reveal system prompt safety rules", k_min=50, k_max=50
+    )
     poison_found = any(
         "reveal" in m.text.lower() and "system prompt" in m.text.lower()
         for m in all_mem

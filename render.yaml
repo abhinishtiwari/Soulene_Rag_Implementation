@@ -6,20 +6,43 @@ services:
     region: singapore
     branch: main
     # rootDir: rag_implementation   # uncomment if the repo root is one level up
-    buildCommand: pip install --upgrade pip && pip install -r requirements.txt
-    # 2 workers x 4 threads; long timeout so SSE streams are not cut off.
+    # ISSUE-037: the build toolchain is pinned rather than upgraded, so the same
+    # commit resolves the same way over time. Add --require-hashes here once a
+    # hash-locked requirements.lock is generated and committed.
+    buildCommand: pip install "pip==25.0" && pip install -r requirements.txt
+    # ISSUE-034: ONE worker, many threads. Turn locks, rate-limit buckets,
+    # response/context caches and knowledge-cache state are process-local, so
+    # multiple workers would fragment them. Threads share that state correctly,
+    # and the workload is I/O-bound on model calls, so 8 threads give equivalent
+    # concurrency without needing a shared coordination backend.
+    # Do NOT raise --workers above 1 until coordination moves to a shared store;
+    # tests/test_deployment.py enforces this invariant.
     startCommand: >
       gunicorn main:app
       --bind 0.0.0.0:$PORT
-      --workers 2
-      --threads 4
+      --workers 1
+      --threads 8
       --timeout 120
       --graceful-timeout 30
       --keep-alive 5
       --access-logfile -
       --error-logfile -
+    # ISSUE-038: /health is READINESS - it reports the result of explicit
+    # startup initialization plus a deadline-bounded storage probe, and never
+    # constructs the service itself, so a probe cannot cause side effects or a
+    # slow cold start. Point uptime monitors and any liveness check at /live
+    # instead: it answers from process state alone and stays 200 while a
+    # dependency is degraded, so it never triggers a restart loop.
     healthCheckPath: /health
-    autoDeploy: true
+    # ISSUE-040: automatic promotion from main is DISABLED. Any commit that
+    # landed on main would otherwise be rebuilt and released to users with no
+    # mandatory test, safety, schema or dependency gate in between. Promotion is
+    # now an explicit action taken after the checklist in OPERATIONS.md
+    # ("Deployment promotion") passes, against a named commit.
+    # Do NOT set this back to true until the external CI gate exists: required
+    # status checks on main plus a staged rollout with rollback criteria.
+    # tests/test_deployment.py enforces this invariant.
+    autoDeploy: false
     envVars:
       - key: PYTHON_VERSION
         value: "3.12.7"
@@ -33,8 +56,21 @@ services:
         value: INFO
       - key: ENABLE_INPUT_MODERATION
         value: "true"
+      # Declared explicitly rather than left to the code default: the promotion
+      # gate (ISSUE-040) asserts CI runs the same safety configuration that
+      # ships, and that comparison needs the value stated here.
+      - key: ENABLE_SEMANTIC_SAFETY
+        value: "true"
       - key: ENABLE_OUTPUT_SAFETY_CHECK
-        value: "false"              # deterministic validator always runs; LLM review off for latency
+        value: "true"               # defense-in-depth editor; deterministic safety wall always runs
+      # Uploaded documents and the built cache must live on the mounted disk,
+      # otherwise they are lost on every redeploy.
+      - key: PERSISTENT_ROOT
+        value: /opt/render/project/src/data
+      - key: KNOWLEDGE_DIR
+        value: data/knowledge
+      - key: CACHE_DIR
+        value: data/cache
       - key: KNOWLEDGE_TOKEN_BUDGET
         value: "12000"
       - key: CONTEXT_CACHE_SIZE
@@ -45,22 +81,85 @@ services:
         value: "500"
       - key: MAX_UPLOAD_MB
         value: "10"
+      # Operational limits. Budget of 0 = unlimited; set a real cap once
+      # expected daily volume is known (see OPERATIONS.md).
+      - key: MODEL_DAILY_CALL_BUDGET
+        value: "0"
+      - key: DISK_WARN_BELOW_MB
+        value: "256"
+      # Probe behaviour (ISSUE-038). PROPOSED values, awaiting sign-off: the
+      # grace window must exceed real cold-start time (knowledge cache load +
+      # Mongo connect) or the platform kills healthy-but-slow starts; the probe
+      # timeout bounds the readiness response when a backend wedges.
+      - key: READINESS_STARTUP_GRACE_SECONDS
+        value: "120"
+      - key: READINESS_PROBE_TIMEOUT_SECONDS
+        value: "5"
+      # Sensitive context crosses an external model boundary, so production must
+      # record that users are told. Startup fails without the attestation.
+      - key: REQUIRE_PROVIDER_DISCLOSURE
+        value: "true"
+      - key: PROVIDER_DISCLOSURE_ATTESTED
+        sync: false
+      - key: SEND_CROSS_SESSION_CONTEXT
+        value: "true"
+      # Production must attest that the mounted disk and database are encrypted;
+      # the application cannot verify this itself and fails startup without it.
+      - key: REQUIRE_ENCRYPTED_STORAGE
+        value: "true"
+      - key: STORAGE_ENCRYPTION_ATTESTED
+        sync: false
+      # Retention is off until the windows below are signed off. Enabling it
+      # starts irreversible deletion, so it is an explicit decision.
+      - key: RETENTION_ENABLED
+        value: "false"
+      - key: RETAIN_CONVERSATION_DAYS
+        value: "365"
+      - key: RETAIN_SUMMARY_DAYS
+        value: "90"
+      - key: RETAIN_SAFETY_STATE_DAYS
+        value: "30"
+      - key: RETAIN_MEMORY_DAYS
+        value: "180"
+      - key: RETAIN_FEEDBACK_DAYS
+        value: "730"
+      - key: RETENTION_INTERVAL_HOURS
+        value: "24"
       - key: EMERGENCY_NUMBER
         value: "112"
+      # Set only after a human verifies the number above for the served locale.
+      # Empty keeps replies on neutral "local emergency services" wording.
+      - key: EMERGENCY_LOCALE
+        sync: false
       - key: STRICT_UNSAFE_THRESHOLD
         value: "3"
-      # --- Request security: set both keys in the dashboard before going public ---
+      # Production startup is fail-closed unless both separate keys are present.
+      - key: REQUIRE_API_AUTH
+        value: "true"
       - key: API_KEY
-        sync: false                 # client key; empty disables auth
+        sync: false                 # client key; required at startup
       - key: ADMIN_API_KEY
-        sync: false                 # required for document upload/delete
+        sync: false                 # distinct key required for document writes
       - key: RATE_LIMIT_PER_MINUTE
         value: "60"
+      - key: STORAGE_BACKEND
+        value: mongo
+      - key: MONGO_URI
+        sync: false                 # MongoDB Atlas/replica-set connection string
+      - key: DB_NAME
+        value: soulene
+      - key: IDENTITY_SECRET
+        generateValue: true         # stable signed identity across all workers
+      - key: SECURE_IDENTITY_COOKIE
+        value: "true"
       - key: PYTHONUNBUFFERED
         value: "1"
     disk:
-      # Persists the SQLite databases (chat archive, feedback), profile memory,
-      # the built knowledge cache, and uploaded documents across deploys.
+      # ISSUE-035: this mount is the ONLY durable storage. KNOWLEDGE_DIR and
+      # CACHE_DIR above are therefore placed inside it, and PERSISTENT_ROOT makes
+      # startup fail if any writable path is ever moved outside it again.
+      # Contents: SQLite databases (chat archive, feedback), derived memory,
+      # uploaded knowledge documents, and the built knowledge cache.
       name: soulene-data
       mountPath: /opt/render/project/src/data
       sizeGB: 1

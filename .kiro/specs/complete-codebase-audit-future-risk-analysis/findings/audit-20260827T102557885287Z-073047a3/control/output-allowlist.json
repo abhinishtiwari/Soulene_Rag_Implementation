@@ -1,0 +1,12 @@
+{
+  "schema_version": "1.0",
+  "run_id": "audit-20260827T102557885287Z-073047a3",
+  "audit_lifetime_created_path_allowlist": [
+    "issue.md",
+    "solution.md",
+    ".kiro/specs/complete-codebase-audit-future-risk-analysis/findings/audit-20260827T102557885287Z-073047a3/**"
+  ],
+  "root_deliverable_writer_task": "10.1 only",
+  "preexisting_root_deliverables": [],
+  "matching": "canonical exact paths; traversal, alternate case, sibling-prefix, and link escape rejected"
+}

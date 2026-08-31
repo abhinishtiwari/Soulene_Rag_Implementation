@@ -1,0 +1,11 @@
+{
+  "all_nonisolated_have_upstream_downstream": true,
+  "entrypoint_count": 13,
+  "gate": "G3",
+  "outcome": "pass",
+  "run_id": "audit-20260827T102557885287Z-073047a3",
+  "schema_version": "1.0",
+  "subsystem_count": 7,
+  "trace_edge_count": 16,
+  "unresolved_path_count": 4
+}

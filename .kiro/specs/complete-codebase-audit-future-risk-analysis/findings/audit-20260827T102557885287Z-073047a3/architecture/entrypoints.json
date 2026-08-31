@@ -1,0 +1,132 @@
+[
+  {
+    "id": "EP-WEB",
+    "kind": "user",
+    "path": "main.py",
+    "run_id": "audit-20260827T102557885287Z-073047a3",
+    "schema_version": "1.0",
+    "symbol": "app",
+    "trigger": "Flask/Gunicorn HTTP routes",
+    "variants": []
+  },
+  {
+    "id": "EP-CLI",
+    "kind": "executable",
+    "path": "main.py",
+    "run_id": "audit-20260827T102557885287Z-073047a3",
+    "schema_version": "1.0",
+    "symbol": "run_cli",
+    "trigger": "python main.py --cli",
+    "variants": []
+  },
+  {
+    "id": "EP-CACHE",
+    "kind": "executable",
+    "path": "build_cache.py",
+    "run_id": "audit-20260827T102557885287Z-073047a3",
+    "schema_version": "1.0",
+    "symbol": "main",
+    "trigger": "cache build/stats CLI",
+    "variants": []
+  },
+  {
+    "id": "EP-UI",
+    "kind": "user",
+    "path": "ui/index.html",
+    "run_id": "audit-20260827T102557885287Z-073047a3",
+    "schema_version": "1.0",
+    "symbol": "initialize/chat submit",
+    "trigger": "browser UI",
+    "variants": []
+  },
+  {
+    "id": "EP-DEV",
+    "kind": "deployment",
+    "path": "main.py",
+    "run_id": "audit-20260827T102557885287Z-073047a3",
+    "schema_version": "1.0",
+    "symbol": "__main__",
+    "trigger": "Flask development server",
+    "variants": []
+  },
+  {
+    "id": "EP-GUNICORN",
+    "kind": "deployment",
+    "path": "render.yaml",
+    "run_id": "audit-20260827T102557885287Z-073047a3",
+    "schema_version": "1.0",
+    "symbol": "startCommand",
+    "trigger": "two workers/four threads",
+    "variants": []
+  },
+  {
+    "id": "EP-PROCFILE",
+    "kind": "deployment",
+    "path": "Procfile",
+    "run_id": "audit-20260827T102557885287Z-073047a3",
+    "schema_version": "1.0",
+    "symbol": "web",
+    "trigger": "Gunicorn process declaration",
+    "variants": []
+  },
+  {
+    "id": "EP-PYTEST",
+    "kind": "test",
+    "path": "pytest.ini",
+    "run_id": "audit-20260827T102557885287Z-073047a3",
+    "schema_version": "1.0",
+    "symbol": "testpaths",
+    "trigger": "pytest tests/ discovery",
+    "variants": []
+  },
+  {
+    "id": "EP-ROOT-ALL",
+    "kind": "test",
+    "path": "test_all.py",
+    "run_id": "audit-20260827T102557885287Z-073047a3",
+    "schema_version": "1.0",
+    "symbol": "__main__",
+    "trigger": "root script test entry",
+    "variants": []
+  },
+  {
+    "id": "EP-ROOT-AUDIT",
+    "kind": "test",
+    "path": "test_audit.py",
+    "run_id": "audit-20260827T102557885287Z-073047a3",
+    "schema_version": "1.0",
+    "symbol": "__main__",
+    "trigger": "root audit script entry",
+    "variants": []
+  },
+  {
+    "id": "EP-CONTEXT-AUDIT",
+    "kind": "test",
+    "path": "context_audit.py",
+    "run_id": "audit-20260827T102557885287Z-073047a3",
+    "schema_version": "1.0",
+    "symbol": "__main__",
+    "trigger": "historical audit script",
+    "variants": []
+  },
+  {
+    "id": "EP-SMOKE-LIVE",
+    "kind": "test",
+    "path": "tests/smoke_live.py",
+    "run_id": "audit-20260827T102557885287Z-073047a3",
+    "schema_version": "1.0",
+    "symbol": "main",
+    "trigger": "live model smoke",
+    "variants": []
+  },
+  {
+    "id": "EP-SMOKE-STAGING",
+    "kind": "test",
+    "path": "tests/smoke_staging.py",
+    "run_id": "audit-20260827T102557885287Z-073047a3",
+    "schema_version": "1.0",
+    "symbol": "main",
+    "trigger": "staging HTTP smoke",
+    "variants": []
+  }
+]

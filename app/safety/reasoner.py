@@ -6,10 +6,12 @@ Deterministic guardrails and cumulative state are authoritative safety floors.
 from __future__ import annotations
 
 import json
+import logging
 import re
 from typing import Any, Dict, List, Optional
 
 from app.config.settings import Settings
+from app.observability import COUNTERS
 from app.safety.guardrails import Guardrails
 from app.types import (
     ModerationSignal, RiskAssessment, RiskDisposition, SafetyLevel, Turn,
@@ -94,6 +96,9 @@ contact_emergency_services, seek_urgent_medical_help, keep_distance_from_others.
 """.strip()
 
 
+log = logging.getLogger("soulene.safety")
+
+
 class ConversationRiskReasoner:
     def __init__(self, settings: Settings, guardrails: Guardrails, client=None):
         self.settings = settings
@@ -115,15 +120,26 @@ class ConversationRiskReasoner:
             and not self._RISKY_ACTIVITY.search((latest_message or "").lower()))
         raw: Dict[str, Any] = {}
         source = "deterministic"
+        degraded = False
         if self.settings.enable_semantic_safety and self.client is not None:
+            candidate: Dict[str, Any] = {}
             try:
                 candidate = self._semantic_call(
                     session_id, latest_message, history, previous)
-                if candidate:
-                    raw = candidate
-                    source = "semantic+deterministic"
-            except Exception:
-                raw = {}
+            except Exception as exc:
+                # Redacted: failure type only, never message content.
+                log.warning("semantic risk assessment unavailable: %s",
+                            type(exc).__name__)
+            if candidate:
+                raw = candidate
+                source = "semantic+deterministic"
+            else:
+                # Attempted but unusable (error, timeout or malformed output).
+                # Make the loss of context explicit instead of silently
+                # presenting a deterministic-only verdict as a full assessment.
+                degraded = True
+                source = "deterministic_degraded"
+                COUNTERS.increment("safety_classifier_unavailable")
         result = self._parse(raw)
         result.source = source
 
@@ -133,7 +149,68 @@ class ConversationRiskReasoner:
         # LLM semantic classifier, ensuring danger awareness is never lost.
         self._apply_contextual_danger(result, latest_message, history, previous)
 
+        # Without a semantic result the only remaining multi-turn signal is
+        # deterministic, so apply an explicit trajectory floor.
+        if not raw:
+            self._apply_trajectory_floor(
+                result, latest_message, history, degraded=degraded)
+
         return self._fuse(result, previous, floor)
+
+    # ------------------------------------------------------------------
+    # Deterministic trajectory floor (used when no semantic result exists)
+    #
+    # Individually these phrases are ordinary; accumulating across turns is the
+    # signal. A single hit therefore never escalates — that keeps the calibration
+    # gains from ISSUE-006 intact — but a pattern selects a calm safety check-in
+    # rather than leaving an evolving risk unanswered.
+    # ------------------------------------------------------------------
+    _TRAJECTORY_WINDOW = 8
+    _FINALITY_TRAJECTORY = re.compile(
+        r"\b(?:giv(?:e|en|ing)\s+(?:away\s+)?(?:my\s+)?(?:things|stuff|belongings|possessions)"
+        r"|wr(?:ote|iting)\s+(?:a\s+)?(?:letter|letters|note|notes)\s+to"
+        r"|(?:won'?t|will\s+not|do\s+not|don'?t)\s+(?:think\s+i\s+)?(?:will\s+)?need\s+my"
+        r"|no\s+point\s+(?:to|in)\s+(?:anything|any\s?more|this|it|living|life)"
+        r"|nobody\s+would\s+(?:notice|miss|care)|no\s+one\s+would\s+(?:notice|miss|care)"
+        r"|tired\s+of\s+(?:everything|it\s+all|living|being\s+here)"
+        r"|say(?:ing)?\s+good\s?bye|last\s+time\s+i|won'?t\s+be\s+around"
+        r"|sorted\s+out\s+my\s+affairs|made\s+my\s+will)\b",
+        re.I,
+    )
+
+    def _apply_trajectory_floor(self, result: RiskAssessment, latest: str,
+                                history: List[Turn], *, degraded: bool) -> None:
+        if degraded:
+            result.uncertainty = max(result.uncertainty, 0.6)
+
+        texts = [t.content for t in (history or []) if t.role == "user"]
+        texts = texts[-self._TRAJECTORY_WINDOW:] + [latest or ""]
+        finality_hits = 0
+        distress_turns = 0
+        for text in texts:
+            if self._FINALITY_TRAJECTORY.search(text or ""):
+                finality_hits += 1
+            if self.guardrails.assess_safety_level(
+                    text or "", ModerationSignal()) != SafetyLevel.SAFE:
+                distress_turns += 1
+
+        if finality_hits >= 2 or (finality_hits >= 1 and distress_turns >= 2):
+            result.emotional_trajectory = "worsening"
+            result.hopelessness = True
+            # Enough to reach SELF_HARM_CONCERN, which routes to a check-in.
+            result.self_harm_score = max(result.self_harm_score, 0.45)
+            # Not an acute emergency script: a warm, direct safety check-in.
+            result.acute_now = False
+            marker = ("degraded_semantic_review" if degraded
+                      else "deterministic_trajectory")
+            if marker not in result.evidence:
+                result.evidence.append(marker)
+            if degraded:
+                COUNTERS.increment("safety_degraded_escalations")
+                log.warning(
+                    "degraded safety review escalated to check-in "
+                    "(finality_hits=%s distress_turns=%s)",
+                    finality_hits, distress_turns)
 
     def _semantic_call(self, session_id: str, latest: str, history: List[Turn],
                        previous: Optional[RiskAssessment]) -> Dict[str, Any]:

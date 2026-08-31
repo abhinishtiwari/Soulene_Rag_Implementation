@@ -180,10 +180,69 @@ class HelplineNumberSafetyTests(unittest.TestCase):
             self.rb.enforce_helpline_number(good, Language.ENGLISH, self.num), good)
 
     def test_end_to_end_helpline_is_deterministic(self):
+        from app.safety.emergency import emergency_reference
         sid = f"hl-{uuid.uuid4().hex[:6]}"
         res = self.svc.handle(sid, "what is the helpline number", user_id=sid)
-        self.assertIn(self.num, res.reply)
+        # ISSUE-010: a number is named only when its locale is declared verified;
+        # otherwise the reply must use neutral local-services wording.
+        self.assertIn(emergency_reference(self.svc.settings, Language.ENGLISH),
+                      res.reply)
         self.assertNotIn("988", res.reply)
+
+
+class EmergencyLocaleTests(unittest.TestCase):
+    """ISSUE-010: never assert a number whose applicability is unverified."""
+
+    def _settings(self, **updates):
+        from dataclasses import replace
+        return replace(Settings.from_env(), **updates)
+
+    def test_unverified_locale_uses_neutral_wording(self):
+        from app.safety.emergency import emergency_reference
+        s = self._settings(emergency_number="112", emergency_locale="")
+        self.assertFalse(s.emergency_contact_is_verified)
+        for language in (Language.ENGLISH, Language.HINGLISH, Language.HINDI):
+            reference = emergency_reference(s, language)
+            self.assertIn("emergency services", reference)
+            self.assertNotIn("112", reference)
+
+    def test_declared_locale_names_the_number(self):
+        from app.safety.emergency import emergency_reference
+        s = self._settings(emergency_number="112", emergency_locale="IN")
+        self.assertTrue(s.emergency_contact_is_verified)
+        self.assertEqual(emergency_reference(s, Language.ENGLISH), "112")
+
+    def test_crisis_steps_follow_the_locale_decision(self):
+        from app.safety.crisis import CrisisHandler
+        unknown = CrisisHandler(
+            self._settings(emergency_number="112", emergency_locale=""), None)
+        text = unknown.respond(Language.ENGLISH, "I am in danger right now", "c1")
+        self.assertNotIn("112", text)
+
+        known = CrisisHandler(
+            self._settings(emergency_number="112", emergency_locale="IN"), None)
+        text2 = known.respond(Language.ENGLISH, "I am in danger right now", "c2")
+        self.assertTrue("112" in text2 or "trusted person" in text2)
+
+    def test_invented_foreign_hotline_is_replaced_in_both_modes(self):
+        from app.safety.emergency import emergency_reference
+        for locale in ("", "IN"):
+            s = self._settings(emergency_number="112", emergency_locale=locale)
+            reference = emergency_reference(s, Language.ENGLISH)
+            out = self.rb_for(s).enforce_helpline_number(
+                "You can call 988 for support.", Language.ENGLISH, reference)
+            self.assertNotIn("988", out)
+            self.assertIn(reference, out)
+
+    @staticmethod
+    def rb_for(settings):
+        from app.chatbot.response_builder import ResponseBuilder
+        from app.safety.crisis import CrisisHandler
+        from app.safety.guardrails import Guardrails
+        from app.safety.refusal import RefusalHandler
+        guardrails = Guardrails()
+        return ResponseBuilder(settings, guardrails, RefusalHandler(),
+                               CrisisHandler(settings, None), None)
 
 
 class OtherAppBlockingTests(unittest.TestCase):

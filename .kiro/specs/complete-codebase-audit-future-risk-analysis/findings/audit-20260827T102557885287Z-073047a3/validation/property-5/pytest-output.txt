@@ -1,0 +1,16 @@
+Property 5 single-run validation record
+
+Command:
+$env:PYTHONDONTWRITEBYTECODE='1'; $env:PYTEST_DISABLE_PLUGIN_AUTOLOAD='1'; $env:KIRO_WARNING='LongRunningPBT'; python -m pytest -q -p no:cacheprovider --disable-warnings "test_property_5.py"
+
+Working directory:
+C:\Users\abhin\OneDrive\Desktop\Soulene AI-Rag\New folder\Soulene_Rag_Implementation\.kiro\specs\complete-codebase-audit-future-risk-analysis\findings\audit-20260827T102557885287Z-073047a3\validation\property-5
+
+Captured output:
+ ^C
+
+Exit code: 1
+Audit status: failed-interrupted
+Rerun performed: no
+
+The bounded invocation was interrupted before pytest produced a test summary or a property counterexample. Per the one-shot property-test policy, it was not rerun or repaired.

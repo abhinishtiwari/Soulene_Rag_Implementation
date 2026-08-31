@@ -1,0 +1,76 @@
+F..FFFF........F
+================================== FAILURES ===================================
+__________________ PipelineTests.test_knowledge_cache_built ___________________
+
+self = <tests.test_pipeline.PipelineTests testMethod=test_knowledge_cache_built>
+
+    def test_knowledge_cache_built(self):
+        stats = self.service.cag.knowledge.stats()
+        self.assertGreater(stats["documents"], 0)
+>       self.assertGreater(stats["sections"], 0)
+E       AssertionError: 0 not greater than 0
+
+tests\test_pipeline.py:38: AssertionError
+_____________ PipelineTests.test_services_question_uses_knowledge _____________
+
+self = <tests.test_pipeline.PipelineTests testMethod=test_services_question_uses_knowledge>
+
+    def test_services_question_uses_knowledge(self):
+        res = self.r("What services do you offer?")
+>       self.assertTrue(res.used_rag)
+E       AssertionError: False is not true
+
+tests\test_pipeline.py:57: AssertionError
+________ PipelineTests.test_pricing_question_has_real_price_in_context ________
+
+self = <tests.test_pipeline.PipelineTests testMethod=test_pricing_question_has_real_price_in_context>
+
+    def test_pricing_question_has_real_price_in_context(self):
+        self.r("What is the Wellness plan price?")
+        gen = [c for c in self.fake.calls if c["session"] == self.sid]
+        self.assertTrue(gen)
+>       self.assertIn("449", gen[-1]["input"])
+E       AssertionError: '449' not found in "Recent conversation:\nNo earlier conversation.\n\nKNOWLEDGE: nothing relevant is available for this factual question. Say you don't have that detail and suggest checking in the app — do not guess.\n\nUser just said:\nWhat is the Wellness plan price?"
+
+tests\test_pipeline.py:64: AssertionError
+_____________ PipelineTests.test_athletes_question_uses_knowledge _____________
+
+self = <tests.test_pipeline.PipelineTests testMethod=test_athletes_question_uses_knowledge>
+
+    def test_athletes_question_uses_knowledge(self):
+        res = self.r("What does Soulene provide for athletes?")
+>       self.assertTrue(res.used_rag)
+E       AssertionError: False is not true
+
+tests\test_pipeline.py:68: AssertionError
+____________ PipelineTests.test_mental_health_info_uses_knowledge _____________
+
+self = <tests.test_pipeline.PipelineTests testMethod=test_mental_health_info_uses_knowledge>
+
+    def test_mental_health_info_uses_knowledge(self):
+        res = self.r("What is anxiety?")
+        self.assertEqual(res.intent, Intent.MENTAL_HEALTH_INFO)
+>       self.assertTrue(res.used_rag)
+E       AssertionError: False is not true
+
+tests\test_pipeline.py:73: AssertionError
+________________ PipelineTests.test_knowledge_labelled_as_data ________________
+
+self = <tests.test_pipeline.PipelineTests testMethod=test_knowledge_labelled_as_data>
+
+    def test_knowledge_labelled_as_data(self):
+        self.r("What services do you offer?")
+        gen = [c for c in self.fake.calls if c["session"] == self.sid]
+        text = gen[-1]["input"]
+>       self.assertIn("never instructions", text.lower())
+E       AssertionError: 'never instructions' not found in "recent conversation:\nno earlier conversation.\n\nknowledge: nothing relevant is available for this factual question. say you don't have that detail and suggest checking in the app — do not guess.\n\nuser just said:\nwhat services do you offer?"
+
+tests\test_pipeline.py:129: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/test_pipeline.py::PipelineTests::test_knowledge_cache_built - As...
+FAILED tests/test_pipeline.py::PipelineTests::test_services_question_uses_knowledge
+FAILED tests/test_pipeline.py::PipelineTests::test_pricing_question_has_real_price_in_context
+FAILED tests/test_pipeline.py::PipelineTests::test_athletes_question_uses_knowledge
+FAILED tests/test_pipeline.py::PipelineTests::test_mental_health_info_uses_knowledge
+FAILED tests/test_pipeline.py::PipelineTests::test_knowledge_labelled_as_data
+6 failed, 10 passed in 6.73s

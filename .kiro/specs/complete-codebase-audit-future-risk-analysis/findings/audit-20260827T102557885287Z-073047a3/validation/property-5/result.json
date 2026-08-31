@@ -1,0 +1,15 @@
+{
+  "command": "$env:PYTHONDONTWRITEBYTECODE='1'; $env:PYTEST_DISABLE_PLUGIN_AUTOLOAD='1'; $env:KIRO_WARNING='LongRunningPBT'; python -m pytest -q -p no:cacheprovider --disable-warnings \"test_property_5.py\"",
+  "counterexample": null,
+  "exit_code": 1,
+  "output_ref": "validation/property-5/pytest-output.txt",
+  "property": "Property 5: Test eligibility and execution accounting are total and ordered",
+  "pytest_summary_available": false,
+  "record_type": "property-validation-result",
+  "rerun_performed": false,
+  "run_id": "audit-20260827T102557885287Z-073047a3",
+  "schema_version": "1.0",
+  "status": "failed-interrupted",
+  "stderr_or_stdout": "^C",
+  "task": "6.3 Write the property test for Test Ledger ordering and totality"
+}

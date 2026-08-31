@@ -15,8 +15,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import math
+import os
 import re
+import tempfile
 import threading
 import time
 from dataclasses import dataclass, field
@@ -24,6 +27,12 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 from app.cag.document_processor import SUPPORTED_EXTENSIONS, Section, process_document
+from app.safety.guardrails import Guardrails
+
+log = logging.getLogger("soulene.cag")
+
+# Stateless (compiled regexes only), so one shared instance is enough.
+_GUARDRAILS = Guardrails()
 
 _STOPWORDS = {
     "the", "and", "for", "with", "that", "this", "from", "have", "has", "are", "was",
@@ -92,6 +101,10 @@ class KnowledgeCache:
     """In-memory, persisted knowledge cache with per-document change detection."""
 
     CACHE_FILENAME = "knowledge_cache.json"
+    # v2 keys documents by canonical relative path instead of basename. An older
+    # payload is rejected on load so it is rebuilt rather than silently mixing
+    # two identity schemes (which is what allowed same-name documents to collide).
+    CACHE_VERSION = 2
 
     def __init__(self, knowledge_dir: Path, cache_dir: Path,
                  token_budget: int = 12000):
@@ -149,6 +162,56 @@ class KnowledgeCache:
     def _cache_path(self) -> Path:
         return self.cache_dir / self.CACHE_FILENAME
 
+    def _migrate_payload(self, payload: dict) -> Optional[dict]:
+        """Upgrade a basename-keyed (v1) payload to relative-path identity.
+
+        Preprocessed sections are expensive (and some formats need optional
+        dependencies), so a legacy cache is migrated rather than discarded. A
+        basename that now matches several files is dropped instead of guessed,
+        which lets refresh reprocess those documents under distinct keys.
+        """
+        if payload.get("cache_version") is not None:
+            return None  # unknown future version: rebuild rather than guess
+        by_basename: Dict[str, List[str]] = {}
+        for path in self.knowledge_dir.rglob("*"):
+            if path.is_file() and path.suffix.lower() in SUPPORTED_EXTENSIONS:
+                by_basename.setdefault(path.name, []).append(self._relative_path(path))
+
+        remap = {name: paths[0] for name, paths in by_basename.items()
+                 if len(paths) == 1}
+        migrated_hashes = {remap[name]: value
+                           for name, value in (payload.get("doc_hashes") or {}).items()
+                           if name in remap}
+        migrated_meta = {}
+        for name, meta in (payload.get("doc_meta") or {}).items():
+            if name not in remap:
+                continue
+            entry = dict(meta or {})
+            entry["document"] = remap[name]
+            entry.setdefault("display_name", name)
+            entry["relative_path"] = remap[name]
+            migrated_meta[remap[name]] = entry
+        migrated_sections = []
+        for section in payload.get("sections") or []:
+            name = section.get("document", "")
+            if name not in remap:
+                continue
+            entry = dict(section)
+            entry["document"] = remap[name]
+            metadata = dict(entry.get("metadata") or {})
+            metadata["document"] = remap[name]
+            metadata.setdefault("display_name", name)
+            entry["metadata"] = metadata
+            migrated_sections.append(entry)
+
+        return {
+            "cache_version": self.CACHE_VERSION,
+            "built_at": payload.get("built_at", 0.0),
+            "doc_hashes": migrated_hashes,
+            "doc_meta": migrated_meta,
+            "sections": migrated_sections,
+        }
+
     def load(self) -> bool:
         """Load the persisted cache. Returns True when a cache was loaded."""
         path = self._cache_path()
@@ -158,6 +221,10 @@ class KnowledgeCache:
             payload = json.loads(path.read_text(encoding="utf-8"))
         except Exception:
             return False
+        if payload.get("cache_version") != self.CACHE_VERSION:
+            payload = self._migrate_payload(payload)
+            if payload is None:
+                return False
         with self._lock:
             self._sections = [
                 CachedSection(
@@ -174,10 +241,19 @@ class KnowledgeCache:
             self._reindex()
         return True
 
+    def _on_disk_is_newer(self, built_at: float) -> bool:
+        """True when another writer already persisted a fresher build."""
+        try:
+            existing = json.loads(self._cache_path().read_text(encoding="utf-8"))
+        except Exception:
+            return False
+        return float(existing.get("built_at") or 0.0) > float(built_at or 0.0)
+
     def save(self) -> None:
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         with self._lock:
             payload = {
+                "cache_version": self.CACHE_VERSION,
                 "built_at": self._built_at,
                 "doc_hashes": self._doc_hashes,
                 "doc_meta": self._doc_meta,
@@ -190,15 +266,43 @@ class KnowledgeCache:
                     for s in self._sections
                 ],
             }
-        tmp = self._cache_path().with_suffix(".tmp")
-        tmp.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
-        tmp.replace(self._cache_path())
+        # Never clobber a build that another worker persisted more recently.
+        if self._on_disk_is_newer(payload["built_at"]):
+            return
+        # Unique staging file per writer: a shared fixed .tmp name let concurrent
+        # workers overwrite each other's partial bytes or fail the replace.
+        handle, staged = tempfile.mkstemp(
+            dir=str(self.cache_dir), prefix=".knowledge_cache-", suffix=".tmp")
+        staged_path = Path(staged)
+        try:
+            with os.fdopen(handle, "w", encoding="utf-8") as stream:
+                json.dump(payload, stream, ensure_ascii=False)
+        except BaseException:
+            staged_path.unlink(missing_ok=True)
+            raise
+        # Atomic publish: readers only ever see a complete cache. On Windows the
+        # replace can transiently fail while another worker publishes, so retry
+        # briefly and then yield: the cache is a rebuildable artifact and the
+        # in-memory index is already correct, so losing this race is not an error.
+        for attempt in range(5):
+            try:
+                os.replace(staged_path, self._cache_path())
+                return
+            except PermissionError:
+                time.sleep(0.02 * (attempt + 1))
+        staged_path.unlink(missing_ok=True)
+        log.warning("knowledge cache publish skipped: another writer holds the file")
 
     # ------------------------------------------------------------------
     # Build / refresh
     # ------------------------------------------------------------------
     def _scan(self) -> Dict[str, Tuple[Path, str, str]]:
-        """Return {document_name: (path, content_hash, knowledge_type)}."""
+        """Return {relative_path: (path, content_hash, knowledge_type)}.
+
+        Keyed by canonical relative path, not basename: two documents with the
+        same filename in different folders are distinct documents and both must
+        be indexed.
+        """
         found: Dict[str, Tuple[Path, str, str]] = {}
         if not self.knowledge_dir.exists():
             return found
@@ -218,7 +322,7 @@ class KnowledgeCache:
                     knowledge_type = "general"
             except Exception:
                 knowledge_type = "general"
-            found[path.name] = (path, h.hexdigest(), knowledge_type)
+            found[self._relative_path(path)] = (path, h.hexdigest(), knowledge_type)
         return found
 
     def refresh(self, *, force: bool = False) -> dict:
@@ -227,12 +331,33 @@ class KnowledgeCache:
         with self._lock:
             previous = dict(self._doc_hashes)
 
+        # A document is only reusable when its recorded section count matches the
+        # sections actually held. Without this an inconsistent persisted cache
+        # (hashes present, sections missing) would report "unchanged" forever and
+        # never self-heal, silently serving an incomplete corpus.
+        with self._lock:
+            held: Dict[str, int] = {}
+            for section in self._sections:
+                held[section.document] = held.get(section.document, 0) + 1
+            expected = {
+                doc: int((meta or {}).get("sections", 0))
+                for doc, meta in self._doc_meta.items()
+            }
+
+        def reusable(doc: str) -> bool:
+            return (previous.get(doc) == found[doc][1]
+                    and held.get(doc, 0) == expected.get(doc, -1))
+
         new_docs = [d for d in found if d not in previous]
         changed = [d for d in found if d in previous and previous[d] != found[d][1]]
         removed = [d for d in previous if d not in found]
-        unchanged = [d for d in found if d in previous and previous[d] == found[d][1]]
+        unchanged = [d for d in found if d in previous and reusable(d)]
+        inconsistent = [d for d in found
+                        if d in previous and previous[d] == found[d][1]
+                        and not reusable(d)]
 
-        if not force and not (new_docs or changed or removed) and not self.is_empty():
+        if (not force and not (new_docs or changed or removed or inconsistent)
+                and not self.is_empty()):
             return {"status": "unchanged", "new": 0, "changed": 0, "removed": 0,
                     "unchanged": len(unchanged), **self.stats()}
 
@@ -246,17 +371,28 @@ class KnowledgeCache:
             doc_meta = {d: self._doc_meta[d] for d in keep if d in self._doc_meta}
             for doc in reprocess:
                 path, content_hash, knowledge_type = found[doc]
-                secs = process_document(path, knowledge_type)
+                secs = process_document(path, knowledge_type, document_id=doc)
                 new_sections.extend(secs)
                 doc_meta[doc] = {
                     "document": doc,
+                    "display_name": path.name,
                     "knowledge_type": knowledge_type,
                     "content_hash": content_hash,
                     "version": content_hash[:8],
                     "sections": len(secs),
                     "format": path.suffix.lstrip(".").lower(),
                     "updated_at": time.time(),
+                    # Recorded so deletion can target one exact file instead of
+                    # every file that happens to share the basename.
+                    "relative_path": self._relative_path(path),
                 }
+
+            # Ingestion safety policy: a document is untrusted input, so
+            # instruction-like content is removed once here rather than being
+            # re-scanned on every request.
+            for section in new_sections:
+                section.text = _GUARDRAILS.scrub_instruction_like(section.text)
+                section.heading = _GUARDRAILS.scrub_instruction_like(section.heading)
 
             combined = retained + [
                 CachedSection(section_id=0, heading=s.heading, text=s.text,
@@ -278,8 +414,60 @@ class KnowledgeCache:
         return {"status": "rebuilt", "new": len(new_docs), "changed": len(changed),
                 "removed": len(removed), "unchanged": len(unchanged), **self.stats()}
 
+    def _relative_path(self, path: Path) -> str:
+        try:
+            return Path(path).relative_to(self.knowledge_dir).as_posix()
+        except ValueError:
+            return Path(path).name
+
+    def source_provenance(self, documents: List[str]) -> List[dict]:
+        """Document id plus content version for user-visible attribution."""
+        with self._lock:
+            meta = {doc: dict(values) for doc, values in self._doc_meta.items()}
+        provenance = []
+        for name in documents:
+            entry = meta.get(name, {})
+            provenance.append({
+                "document": name,
+                "display_name": str(entry.get("display_name") or Path(name).name),
+                "version": str(entry.get("version") or ""),
+                "updated_at": float(entry.get("updated_at") or 0.0),
+            })
+        return provenance
+
+    def resolve_document(self, name: str) -> Optional[str]:
+        """Map a relative path or an unambiguous basename to a document key.
+
+        A bare basename that matches several documents returns None rather than
+        picking one, so callers must disambiguate instead of acting on a guess.
+        """
+        key = Path(name).as_posix()
+        with self._lock:
+            if key in self._doc_meta:
+                return key
+            matches = [
+                doc for doc, meta in self._doc_meta.items()
+                if str(meta.get("display_name") or Path(doc).name) == Path(name).name
+            ]
+        return matches[0] if len(matches) == 1 else None
+
+    def document_path(self, document_name: str) -> Optional[Path]:
+        """Resolve the exact file backing an indexed document, or None."""
+        key = self.resolve_document(document_name)
+        if key is None:
+            return None
+        with self._lock:
+            meta = dict(self._doc_meta.get(key) or {})
+        relative = str(meta.get("relative_path") or key)
+        candidate = self.knowledge_dir / relative
+        return candidate if candidate.is_file() else None
+
     def remove_document(self, document_name: str) -> bool:
         """Drop a document's sections from the cache (and its file record)."""
+        resolved = self.resolve_document(document_name)
+        if resolved is None:
+            return False
+        document_name = resolved
         with self._lock:
             if document_name not in self._doc_hashes:
                 return False
@@ -288,6 +476,9 @@ class KnowledgeCache:
                 sec.section_id = i
             self._doc_hashes.pop(document_name, None)
             self._doc_meta.pop(document_name, None)
+            # Removal changes cache state, so this build must win the version
+            # check against an older persisted copy.
+            self._built_at = time.time()
             self._reindex()
         self.save()
         return True
@@ -389,7 +580,10 @@ class KnowledgeCache:
         # Corpus larger than budget -> narrow, still no vector search.
         picked = self.search_sections(query, limit=40, knowledge_type=knowledge_type)
         if not picked:
-            picked = self._sections[:20]
+            # Explicit no-result. Injecting arbitrary leading sections would let
+            # the model answer from unrelated material while appearing grounded;
+            # an empty result makes the caller state that it does not know.
+            return "", []
         out, used, docs = [], 0, set()
         for sec in picked:
             block = sec.rendered()

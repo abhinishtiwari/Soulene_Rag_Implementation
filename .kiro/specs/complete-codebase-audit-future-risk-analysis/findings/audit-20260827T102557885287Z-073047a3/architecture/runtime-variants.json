@@ -1,0 +1,53 @@
+[
+  {
+    "family": "startup/readiness",
+    "limitations": [
+      "no explicit shared-client shutdown hook"
+    ],
+    "variants": [
+      "Flask direct",
+      "CLI",
+      "Gunicorn warm import",
+      "first-request lazy",
+      "health-triggered"
+    ]
+  },
+  {
+    "family": "request",
+    "variants": [
+      "open index/health",
+      "optional shared API auth",
+      "optional admin auth",
+      "per-process rate limiting"
+    ]
+  },
+  {
+    "family": "chat",
+    "variants": [
+      "deterministic-only",
+      "semantic fusion",
+      "output reviewer on/off",
+      "crisis/refusal/cache/model",
+      "generation/archive failure",
+      "duplicate request"
+    ]
+  },
+  {
+    "family": "persistence",
+    "variants": [
+      "SQLite",
+      "Mongo replica-set transactions",
+      "legacy JSON migration",
+      "separate feedback"
+    ]
+  },
+  {
+    "family": "deployment",
+    "variants": [
+      "single process",
+      "2 workers x 4 threads",
+      "mounted data",
+      "unmounted knowledge/cache"
+    ]
+  }
+]

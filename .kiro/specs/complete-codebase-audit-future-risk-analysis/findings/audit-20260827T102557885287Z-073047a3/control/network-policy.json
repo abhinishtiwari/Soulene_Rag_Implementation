@@ -1,0 +1,6 @@
+{
+  "schema_version": "1.0",
+  "run_id": "audit-20260827T102557885287Z-073047a3",
+  "policy": "deny",
+  "enforcement": "no external network access permitted; networking-capable tests remain ineligible unless host-enforced denial is attested"
+}

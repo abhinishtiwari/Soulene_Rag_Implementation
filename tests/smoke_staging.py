@@ -1,13 +1,24 @@
 """Staging smoke test — real API, end-to-end, focused on the hardening fixes.
 
-Run: python -m tests.smoke_staging
+Run: SOULENE_ALLOW_LIVE_SMOKE=1 python -m tests.smoke_staging
+Lane `smoke-staging` in tests/lanes.py: live provider calls and non-hermetic
+writes, so it is opt-in like the other live lanes.
 """
 
 from __future__ import annotations
 
+import os
 import sys
 import time
 import uuid
+
+# ISSUE-033: opt-in guard (see smoke_live.py).
+if os.getenv("SOULENE_ALLOW_LIVE_SMOKE", "").lower() not in {"1", "true", "yes"}:
+    print("Refusing to run the staging smoke lane.")
+    print("  - it makes real provider calls (costs tokens)")
+    print("  - it writes the repository's data/ directory, not a sandbox")
+    print("Set SOULENE_ALLOW_LIVE_SMOKE=1 for a deliberate run.")
+    sys.exit(2)
 
 try:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")

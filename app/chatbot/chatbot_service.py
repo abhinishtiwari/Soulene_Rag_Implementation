@@ -22,6 +22,10 @@ Memory layers are strictly separated:
 
 from __future__ import annotations
 
+import logging
+import re
+import threading
+import uuid
 from typing import Iterator, List, Optional
 
 from app.cag.cag_engine import CAGEngine
@@ -33,6 +37,7 @@ from app.memory.long_term_memory import LongTermMemory
 from app.prompts.system_prompt import build_instructions, build_model_input
 from app.safety.crisis import CrisisHandler
 from app.safety.guardrails import Guardrails
+from app.safety.emergency import emergency_reference
 from app.safety.reasoner import ConversationRiskReasoner
 from app.safety.refusal import RefusalHandler
 from app.storage.chat_archive import ChatArchive
@@ -48,10 +53,17 @@ from app.types import (
     SafetyLevel,
     Turn,
 )
-from app.utils import clean_message, strip_markdown
+from app.utils import (
+    MAX_MESSAGE_CHARS,
+    clean_message,
+    exceeds_message_limit,
+    oversized_message_reply,
+    strip_markdown,
+)
 
 # Intents whose answers are factual and therefore safe to cache/reuse.
 _CACHEABLE_INTENTS = {Intent.SOULENE_INFO, Intent.MENTAL_HEALTH_INFO}
+log = logging.getLogger(__name__)
 
 
 class ChatbotService:
@@ -70,6 +82,10 @@ class ChatbotService:
         self.profile = profile
         self.response_builder = response_builder
         self.archive = archive
+        if self.archive is None:
+            raise RuntimeError("a durable chat archive is required")
+        self._locks_guard = threading.Lock()
+        self._turn_locks: dict[str, threading.RLock] = {}
         self.risk_reasoner = risk_reasoner or ConversationRiskReasoner(
             settings, guardrails, client)
 
@@ -77,55 +93,276 @@ class ChatbotService:
     # Public API
     # ------------------------------------------------------------------
     def handle(self, session_id: str, user_message: str, *,
-               user_id: Optional[str] = None) -> ChatResult:
+               user_id: Optional[str] = None,
+               request_id: Optional[str] = None) -> ChatResult:
         user_id = user_id or session_id
+        # Refuse oversized input before any analysis, safety state mutation or
+        # commit. Truncating here would hide risk wording in the dropped suffix.
+        if exceeds_message_limit(user_message):
+            return ChatResult(
+                reply=oversized_message_reply(user_message), route=Route.SUPPORT,
+                notes=["rejected=message_too_long",
+                       f"limit={MAX_MESSAGE_CHARS}"],
+            )
         message = clean_message(user_message)
         if not message:
             return ChatResult(reply="I'm here whenever you're ready.", route=Route.SUPPORT)
-
+        request_id = request_id or uuid.uuid4().hex
         context_id = self._context_id(user_id, session_id)
-        self._ensure_context_loaded(user_id, session_id, context_id)
-        history = self.cag.context.all_cached(context_id)
-        moderation = self._moderate(message)
-        risk = self.risk_reasoner.assess(
-            session_id=session_id, latest_message=message, history=history,
-            moderation=moderation,
-            previous_state=self.cag.context.safety_state(context_id),
-        )
-        # Safety reasoning and its durable state are complete before any reply.
-        self.cag.context.set_safety_state(context_id, risk.to_dict())
-        self._persist_safety_state(user_id, session_id, risk)
-        strategy = self._analyze(context_id, message, moderation, risk)
 
-        route, reply, lookup = self._respond(
-            session_id, user_id, context_id, message, strategy)
-        reply = strip_markdown(reply) or self._fallback(strategy.language)
+        with self._turn_lock(context_id):
+            # Rehydrate first, then converge any durable derived work left by a
+            # prior crash or secondary-store outage before handling/replaying.
+            self._ensure_context_loaded(user_id, session_id, context_id)
+            self._drain_secondary(user_id, session_id, context_id)
+            existing = self._get_completed_request(
+                user_id, session_id, request_id, message)
+            if existing is not None:
+                return self._replay(existing)
 
-        # Persist a complete pair after generation so prompt history contains the
-        # current message exactly once and failed generations do not leave orphans.
-        self._ingest_user_turn(user_id, session_id, context_id, message, strategy)
-        self._ingest_assistant_turn(user_id, session_id, context_id, reply)
+            # Derived state mutates during analysis but is only legitimate once
+            # the authoritative turn commits, so stage it for rollback.
+            staged = self.cag.context.derived_snapshot(context_id)
+            try:
+                # Permanent storage is refreshed before every turn. In-memory context
+                history = self.cag.context.all_cached(context_id)
+                moderation = self._moderate(message)
+                risk = self.risk_reasoner.assess(
+                    session_id=session_id, latest_message=message, history=history,
+                    moderation=moderation,
+                    previous_state=self.cag.context.safety_state(context_id),
+                )
+                self.cag.context.set_safety_state(context_id, risk.to_dict())
+                if self.guardrails.expresses_dependency(message):
+                    self.cag.context.bump(context_id, "dependency_disclosures")
+                strategy = self._analyze(context_id, message, moderation, risk)
+                route, reply, lookup = self._respond(
+                    session_id, user_id, context_id, message, strategy)
+                reply = strip_markdown(reply) or self._fallback(strategy.language)
 
-        # FIX: Refresh the rolling summary unconditionally after every turn pair.
-        # Previously this only ran inside _build_prompt(), so crisis/refusal/cache-hit
-        # paths never updated the summary — causing context loss after 50+ responses.
-        self._refresh_summary(context_id)
+                state = self._minimize_state(risk.to_dict())
+                state["counters"] = self.cag.context.get_counters(context_id)
+                previous_summary = self.cag.context.summary(context_id)
+                if previous_summary:
+                    state["summary"] = previous_summary
+                    state["summary_source"] = self.cag.context.summary_source(context_id)
+                stored = self._record_turn(
+                    user_id, session_id, message, reply, request_id,
+                    state=state, route=route.value,
+                )
+            except BaseException:
+                # The turn never became authoritative: undo local safety/counter
+                # /summary mutations so a retry cannot inherit phantom state.
+                self.cag.context.restore_derived(context_id, staged)
+                raise
+            if stored.get("duplicate"):
+                self.cag.context.clear(context_id)
+                self._ensure_context_loaded(user_id, session_id, context_id)
+                return self._replay(stored)
 
-        if (route == Route.SUPPORT and strategy.intent in _CACHEABLE_INTENTS
-                and lookup is not None and not lookup.cache_hit):
-            self.cag.store_answer(message, reply, lookup.sources)
+            # Only mutate caches and derived memory after the authoritative turn
+            # transaction commits. Clearing cache can therefore never lose data.
+            self.cag.context.append(context_id, "user", message)
+            self.cag.context.append(context_id, "assistant", reply)
+            self.cag.context.invalidate_cross_session(f"{len(user_id)}:{user_id}")
+            if strategy.intent not in (Intent.INJECTION, Intent.HARMFUL, Intent.SEXUAL):
+                memory_completed = self._persist_memory_secondary(
+                    user_id, session_id, request_id, message,
+                    str(stored.get("user_message_id") or ""), mark=False,
+                )
+            else:
+                memory_completed = True
 
+            self._refresh_summary(context_id)
+            try:
+                self._persist_safety_state(
+                    user_id, session_id, risk,
+                    request_id=request_id,
+                    memory_completed=memory_completed,
+                )
+            except Exception as exc:
+                log.exception(
+                    "summary/state persistence deferred user=%s session=%s request=%s",
+                    user_id, session_id, request_id,
+                )
+                self._mark_secondary(
+                    user_id, session_id, request_id, "summary",
+                    error=type(exc).__name__,
+                )
+            else:
+                if not memory_completed:
+                    self._mark_secondary(
+                        user_id, session_id, request_id, "memory",
+                        error="memory persistence failed",
+                    )
+
+            cache_scope = self._cache_scope(user_id)
+            if (route == Route.SUPPORT and strategy.intent in _CACHEABLE_INTENTS
+                    and lookup is not None and not lookup.cache_hit):
+                self.cag.store_answer(
+                    message, reply, lookup.sources, cache_scope=cache_scope)
+
+            # Provenance is carried out of the pipeline so callers can attribute
+            # a grounded answer instead of trusting it implicitly (ISSUE-016).
+            sources = []
+            if lookup is not None and lookup.sources:
+                try:
+                    sources = self.cag.knowledge.source_provenance(lookup.sources)
+                except Exception:
+                    sources = []
+            return ChatResult(
+                reply=reply, route=route, knowledge_type=strategy.knowledge_type,
+                used_rag=bool(lookup and (lookup.knowledge_hit or lookup.cache_hit)),
+                retrieved=sources, notes=[f"intent={strategy.intent.value}",
+                                     f"emotion={strategy.emotion}",
+                                     f"risk_source={risk.source}",
+                                     f"cumulative_risk={risk.cumulative_score:.2f}",
+                                     f"cache_hit={bool(lookup and lookup.cache_hit)}"],
+                safety_level=strategy.safety_level, intent=strategy.intent,
+                used_memory=strategy.memory_required,
+            )
+
+    def _turn_lock(self, context_id: str) -> threading.RLock:
+        with self._locks_guard:
+            return self._turn_locks.setdefault(context_id, threading.RLock())
+
+    @staticmethod
+    def _cache_scope(user_id: str) -> str:
+        return f"knowledge:{len(user_id)}:{user_id}"
+
+    @staticmethod
+    def _replay(stored: dict) -> ChatResult:
+        try:
+            route = Route(stored.get("route", Route.SUPPORT.value))
+        except ValueError:
+            route = Route.SUPPORT
         return ChatResult(
-            reply=reply, route=route, knowledge_type=strategy.knowledge_type,
-            used_rag=bool(lookup and (lookup.knowledge_hit or lookup.cache_hit)),
-            retrieved=[], notes=[f"intent={strategy.intent.value}",
-                                 f"emotion={strategy.emotion}",
-                                 f"risk_source={risk.source}",
-                                 f"cumulative_risk={risk.cumulative_score:.2f}",
-                                 f"cache_hit={bool(lookup and lookup.cache_hit)}"],
-            safety_level=strategy.safety_level, intent=strategy.intent,
-            used_memory=strategy.memory_required,
+            reply=str(stored.get("reply") or stored.get("assistant_content") or ""),
+            route=route, notes=["idempotent_replay=True"],
         )
+
+    def _get_completed_request(
+        self, user_id: str, session_id: str, request_id: str,
+        message: Optional[str] = None,
+    ):
+        getter = getattr(self.archive, "get_request", None)
+        existing = getter(user_id, session_id, request_id) if callable(getter) else None
+        if (existing is not None and message is not None
+                and existing.get("user_content") != message):
+            raise ValueError("idempotency key was already used for a different message")
+        return existing
+
+    def _record_turn(self, user_id: str, session_id: str, message: str,
+                     reply: str, request_id: str, *, state: dict,
+                     route: str) -> dict:
+        recorder = getattr(self.archive, "record_turn", None)
+        if callable(recorder):
+            return recorder(user_id, session_id, message, reply, request_id,
+                            state=state, route=route)
+        # Compatibility for non-runtime test archives. Canonical backends always
+        # implement atomic record_turn; persistence errors still propagate.
+        user_msg = self.archive.record(user_id, session_id, "user", message)
+        assistant_msg = self.archive.record(
+            user_id, session_id, "assistant", reply)
+        return {"reply": reply, "route": route, "duplicate": False,
+                "user_message_id": user_msg.message_id,
+                "assistant_message_id": assistant_msg.message_id}
+
+    def _mark_secondary(
+        self, user_id: str, session_id: str, request_id: str,
+        component: str, *, error: Optional[str] = None,
+    ) -> None:
+        marker = getattr(self.archive, "mark_secondary", None)
+        if not callable(marker):
+            return
+        try:
+            marker(user_id, session_id, request_id, component, error=error)
+        except Exception:
+            # The pending marker was created atomically with the turn, so a
+            # marker-update failure remains recoverable on the next request.
+            log.exception(
+                "secondary status update failed component=%s user=%s session=%s request=%s",
+                component, user_id, session_id, request_id,
+            )
+
+    def _persist_memory_secondary(
+        self, user_id: str, session_id: str, request_id: str,
+        message: str, user_message_id: str, *, mark: bool = True,
+    ) -> bool:
+        try:
+            self.profile.observe(
+                user_id, message, source_session_id=session_id,
+                source_message_id=user_message_id,
+            )
+        except Exception as exc:
+            log.exception(
+                "derived memory persistence deferred user=%s session=%s request=%s",
+                user_id, session_id, request_id,
+            )
+            if mark:
+                self._mark_secondary(
+                    user_id, session_id, request_id, "memory",
+                    error=type(exc).__name__,
+                )
+            return False
+        else:
+            if mark:
+                self._mark_secondary(user_id, session_id, request_id, "memory")
+            return True
+
+    def _drain_secondary(
+        self, user_id: str, session_id: str, context_id: str,
+    ) -> None:
+        pending = getattr(self.archive, "pending_secondary", None)
+        if not callable(pending):
+            return
+        try:
+            items = pending(user_id, session_id, 50)
+        except Exception:
+            log.exception(
+                "secondary work lookup failed user=%s session=%s", user_id, session_id
+            )
+            return
+        summary_items = []
+        for item in items:
+            request_id = str(item.get("request_id") or "")
+            if item.get("memory_status") != "completed":
+                if item.get("route") == Route.REFUSAL.value:
+                    self._mark_secondary(
+                        user_id, session_id, request_id, "memory"
+                    )
+                else:
+                    self._persist_memory_secondary(
+                        user_id, session_id, request_id,
+                        str(item.get("user_content") or ""),
+                        str(item.get("user_message_id") or ""),
+                    )
+            if item.get("summary_status") != "completed":
+                summary_items.append(item)
+        if not summary_items:
+            return
+        try:
+            self._refresh_summary(context_id, allow_llm=False)
+            state = self.cag.context.safety_state(context_id)
+            state["counters"] = self.cag.context.get_counters(context_id)
+            summary = self.cag.context.summary(context_id)
+            if summary:
+                state["summary"] = summary
+            self.archive.save_safety_state(user_id, session_id, state)
+        except Exception as exc:
+            log.exception(
+                "summary/state retry deferred user=%s session=%s", user_id, session_id
+            )
+            for item in summary_items:
+                self._mark_secondary(
+                    user_id, session_id, str(item.get("request_id") or ""),
+                    "summary", error=type(exc).__name__,
+                )
+        else:
+            for item in summary_items:
+                self._mark_secondary(
+                    user_id, session_id, str(item.get("request_id") or ""), "summary"
+                )
 
     def handle_message(self, session_id: str, user_message: str) -> str:
         return self.handle(session_id, user_message).reply
@@ -142,8 +379,19 @@ class ChatbotService:
     def clear(self, session_id: str, user_id: Optional[str] = None) -> None:
         self.cag.context.clear(self._context_id(user_id or session_id, session_id))
 
+    def clear_user(self, user_id: str) -> None:
+        self.cag.context.clear_user(user_id)
+        self.cag.responses.invalidate_scope(self._cache_scope(user_id))
+
     def stats(self) -> dict:
-        return self.cag.stats()
+        stats = self.cag.stats()
+        counter = getattr(self.archive, "secondary_pending_count", None)
+        if callable(counter):
+            try:
+                stats["secondary_persistence"] = {"pending": counter()}
+            except Exception:
+                stats["secondary_persistence"] = {"status": "unavailable"}
+        return stats
 
     # ------------------------------------------------------------------
     # Pipeline stages
@@ -177,16 +425,20 @@ class ChatbotService:
 
     def _ingest_user_turn(self, user_id, session_id, context_id,
                           message, strategy) -> None:
-        self._archive(user_id, session_id, "user", message)
+        user_message = self._archive(user_id, session_id, "user", message)
         self.cag.context.append(context_id, "user", message)
-        # ISS-06 FIX: Store memories from ALL messages EXCEPT injection/harmful/sexual.
-        # Important personal details are often shared during vulnerable moments
-        # (e.g. "my dad has cancer", "my friend died"). These MUST be remembered.
+        # Important personal details are often shared during vulnerable moments.
         if strategy.intent not in (Intent.INJECTION, Intent.HARMFUL, Intent.SEXUAL):
             try:
-                self.profile.observe(user_id, message)
+                self.profile.observe(
+                    user_id, message, source_session_id=session_id,
+                    source_message_id=user_message.message_id,
+                )
             except Exception:
-                pass
+                log.exception(
+                    "derived memory persistence failed user=%s session=%s",
+                    user_id, session_id,
+                )
 
     def _ingest_assistant_turn(self, user_id, session_id, context_id, reply) -> None:
         self._archive(user_id, session_id, "assistant", reply)
@@ -195,7 +447,7 @@ class ChatbotService:
         # this user is now out of date.
         self.cag.context.invalidate_cross_session(f"{len(user_id)}:{user_id}")
 
-    def _lookup(self, message: str, strategy: ResponseStrategy):
+    def _lookup(self, user_id: str, message: str, strategy: ResponseStrategy):
         # Knowledge is available for info questions even if the user is distressed
         # (e.g. "I'm anxious, what breathing exercise helps?") — but never in a crisis.
         needs_knowledge = strategy.rag_required and not strategy.safety_level.is_crisis
@@ -205,6 +457,7 @@ class ChatbotService:
                 knowledge_type=None if strategy.knowledge_type == KnowledgeType.NONE
                 else strategy.knowledge_type.value,
                 allow_response_cache=strategy.intent in _CACHEABLE_INTENTS,
+                cache_scope=self._cache_scope(user_id),
             )
         except Exception:
             from app.cag.cag_engine import CAGLookup
@@ -246,6 +499,14 @@ class ChatbotService:
             return Route.CRISIS, self._finalize_reply(
                 session_id, message, reply, strategy), None
 
+        # Injection never reaches the model. Answering deterministically means no
+        # history, summary, memory or knowledge is assembled for an attacker, so
+        # containment does not depend on the model following instructions.
+        if strategy.intent == Intent.INJECTION:
+            reply = self.refusal.respond("injection", strategy.language)
+            return Route.REFUSAL, self._finalize_reply(
+                session_id, message, reply, strategy), None
+
         if strategy.intent == Intent.HARMFUL:
             reply = self.refusal.respond("harmful", strategy.language)
             return Route.REFUSAL, self._finalize_reply(
@@ -257,12 +518,13 @@ class ChatbotService:
 
         if strategy.intent == Intent.HELPLINE_REQUEST:
             reply = self.response_builder.helpline_reply(
-                strategy.language, self.settings.emergency_number)
+                strategy.language,
+                emergency_reference(self.settings, strategy.language))
             return Route.SUPPORT, self._finalize_reply(
                 session_id, message, reply, strategy), None
 
         if lookup is None:
-            lookup = self._lookup(message, strategy)
+            lookup = self._lookup(user_id, message, strategy)
         if lookup.cached_answer:
             reply = self._finalize_reply(
                 session_id, message, lookup.cached_answer, strategy)
@@ -271,8 +533,27 @@ class ChatbotService:
         reply = self._generate(
             session_id, user_id, context_id, message, strategy, lookup)
         reply = self._finalize_reply(session_id, message, reply, strategy)
-        route = Route.REFUSAL if strategy.intent == Intent.INJECTION else Route.SUPPORT
-        return route, reply, lookup
+        reply = self._apply_relational_boundary(
+            context_id, message, reply, strategy)
+        return Route.SUPPORT, reply, lookup
+
+    # Repeated exclusive-reliance disclosures are a longitudinal signal, so the
+    # boundary is added on every Nth occurrence rather than on a single message
+    # (which would misread one lonely sentence) or on every turn (which would
+    # nag someone who is already struggling).
+    _DEPENDENCY_BOUNDARY_EVERY = 3
+
+    def _apply_relational_boundary(self, context_id: str, message: str,
+                                   reply: str, strategy: ResponseStrategy) -> str:
+        # Only respond to the disclosure itself, so later ordinary turns are not
+        # repeatedly reminded once the threshold has been reached.
+        if not self.guardrails.expresses_dependency(message):
+            return reply
+        count = self.cag.context.counter(context_id, "dependency_disclosures")
+        if count and count % self._DEPENDENCY_BOUNDARY_EVERY == 0:
+            return self.response_builder.append_relational_boundary(
+                reply, strategy.language)
+        return reply
 
     def _finalize_reply(self, session_id: str, message: str, reply: str,
                         strategy: ResponseStrategy) -> str:
@@ -297,7 +578,8 @@ class ChatbotService:
         if strategy.medical_request or strategy.safety_level == SafetyLevel.EMOTIONAL_DISTRESS:
             reply = rb.enforce_no_promo(reply, lang)
         # Never let an invented (often foreign) hotline number reach the user.
-        reply = rb.enforce_helpline_number(reply, lang, self.settings.emergency_number)
+        reply = rb.enforce_helpline_number(
+            reply, lang, emergency_reference(self.settings, lang))
         return reply
 
     # ------------------------------------------------------------------
@@ -332,7 +614,7 @@ class ChatbotService:
         "Do NOT give advice. Only summarize what they said. Be specific, not generic."
     )
 
-    def _refresh_summary(self, session_id: str) -> None:
+    def _refresh_summary(self, session_id: str, *, allow_llm: bool = True) -> None:
         """Update the rolling summary from turns that fell out of the window."""
         ctx = self.cag.context
         if not ctx.needs_summary(session_id):
@@ -345,30 +627,78 @@ class ChatbotService:
             return
 
         # ISS-01/04 FIX: Try LLM-based summary for rich context preservation.
-        if self.client is not None:
+        if allow_llm and self.client is not None:
             try:
+                previous = ctx.summary(session_id)
                 overflow_text = "\n".join(
                     f"{'User' if t.role == 'user' else 'Soulene'}: {t.content}"
                     for t in overflow
                 )
+                input_text = overflow_text
+                if previous:
+                    input_text = (
+                        "Existing durable summary (preserve all still-relevant facts):\n"
+                        f"{previous}\n\nNewly available older turns:\n{overflow_text}"
+                    )
                 summary = self.client.generate(
                     instructions=self._SUMMARY_INSTRUCTION,
-                    input_text=overflow_text[:3000],
+                    input_text=input_text[:6000],
                     session_id=f"{session_id}_summary",
                 )
-                if summary and len(summary.strip()) > 20:
-                    ctx.set_summary(session_id, summary.strip()[:500])
+                validated = self._validated_summary(summary, session_id)
+                if validated is not None:
+                    ctx.set_summary(session_id, validated, source="model")
                     return
+                if summary and summary.strip():
+                    # Rejected derived context is never stored or reused; the
+                    # deterministic excerpt below is built from the user's words.
+                    log.warning("generated summary rejected by derived-text safety")
             except Exception:
-                pass  # Fall back to keyword-based summary below
+                log.exception("rolling summary generation failed; using deterministic fallback")
 
-        # Fallback: keyword-based summary (original logic)
+        # Deterministic fallback always retains a bounded narrative excerpt;
+        # topic labels are added when available but are not the sole content.
         topics = [label for label, keys in self._SUMMARY_TOPICS
                   if any(k in blob for k in keys)]
-        if not topics:
-            return
-        summary = "Earlier they talked about: " + ", ".join(topics[:5]) + "."
-        ctx.set_summary(session_id, summary)
+        user_text = " ".join(
+            t.content.strip() for t in overflow if t.role == "user" and t.content.strip()
+        )
+        if len(user_text) > 700:
+            user_text = user_text[:340] + " … " + user_text[-340:]
+        label = (" Topics: " + ", ".join(topics[:5]) + ".") if topics else ""
+        addition = f"Earlier context: {user_text}.{label}".strip()
+        previous = ctx.summary(session_id)
+        summary = f"{previous} {addition}".strip() if previous else addition
+        ctx.set_summary(session_id, summary[:1000], source="deterministic")
+
+    # A summary must never quietly assert that risk has resolved: it is reused as
+    # context on later turns and could suppress a real, still-active concern.
+    _SUMMARY_RESOLUTION_CLAIM = re.compile(
+        r"\b(?:no longer (?:at risk|suicidal|in danger|a risk)|is (?:now )?safe now"
+        r"|has (?:fully )?recovered|fully recovered|risk has passed"
+        r"|no (?:further |remaining )?risk)\b",
+        re.I,
+    )
+
+    def _validated_summary(self, summary: str, context_id: str) -> Optional[str]:
+        """Return storable summary text, or None when it must be rejected."""
+        text = (summary or "").strip()
+        if len(text) <= 20:
+            return None
+        # Derived text re-enters the prompt, so it passes the same walls as a reply.
+        if self.response_builder.contains_unsafe_derived_text(text):
+            return None
+        if self.guardrails.is_injection(text):
+            return None
+        if self._SUMMARY_RESOLUTION_CLAIM.search(text):
+            state = self.cag.context.safety_state(context_id)
+            try:
+                level = SafetyLevel(str(state.get("safety_level", "")))
+            except ValueError:
+                level = SafetyLevel.SAFE
+            if level.is_crisis:
+                return None
+        return text[:1000]
 
     # ------------------------------------------------------------------
     # Cross-session context
@@ -380,7 +710,7 @@ class ChatbotService:
     # architecture (no embeddings), and nothing is included when nothing scores.
     # ------------------------------------------------------------------
     _RECENT_SESSIONS = 3
-    _DIGEST_SESSIONS = 30
+    _DIGEST_PAGE_SIZE = 100
     # Ceiling on the cross-session block so background context can never crowd
     # out the current turn or inflate cost without bound.
     _CROSS_SESSION_CHAR_BUDGET = 2400
@@ -394,34 +724,27 @@ class ChatbotService:
 
     @classmethod
     def _keywords(cls, text: str) -> set:
-        import re as _re
-        return {t for t in _re.findall(r"[a-z0-9']+", (text or "").lower())
+        return {t for t in re.findall(r"[a-z0-9']+", (text or "").lower())
                 if len(t) > 2 and t not in cls._STOP}
 
     def _load_cross_session(self, user_id: str, session_id: str):
-        """Fetch (and cache) the user's other sessions. Always user-scoped."""
-        if self.archive is None:
-            return [], []
-        key = f"{len(user_id)}:{user_id}"
-        cached = self.cag.context.cross_session(key)
-        if cached is not None:
-            return cached.recent, cached.digests
-        recent, digests = [], []
-        fetch_recent = getattr(self.archive, "recent_sessions", None)
-        fetch_digests = getattr(self.archive, "session_digests", None)
-        if callable(fetch_recent):
-            try:
-                recent = fetch_recent(user_id, exclude=session_id,
-                                     limit=self._RECENT_SESSIONS) or []
-            except Exception:
-                recent = []
-        if callable(fetch_digests):
-            try:
-                digests = fetch_digests(user_id, exclude=session_id,
-                                       limit=self._DIGEST_SESSIONS) or []
-            except Exception:
-                digests = []
-        self.cag.context.set_cross_session(key, recent, digests)
+        """Fetch other sessions from the durable archive on every request.
+
+        This intentionally avoids process-local cross-session snapshots: a stale
+        worker cache must never resurrect deleted data or hide another worker's
+        committed history.
+        """
+        recent = self.archive.recent_sessions(
+            user_id, exclude=session_id, limit=self._RECENT_SESSIONS) or []
+        digests, skip = [], 0
+        while True:
+            page = self.archive.session_digests(
+                user_id, exclude=session_id,
+                limit=self._DIGEST_PAGE_SIZE, skip=skip) or []
+            digests.extend(page)
+            if len(page) < self._DIGEST_PAGE_SIZE:
+                break
+            skip += len(page)
         return recent, digests
 
     def _cross_session_context(self, user_id: str, session_id: str,
@@ -478,8 +801,7 @@ class ChatbotService:
 
     def _relevant_snippet(self, text: str, q: set, width: int = 320) -> str:
         """Return the part of an older session that best matches the query."""
-        import re as _re
-        sentences = [s.strip() for s in _re.split(r"(?<=[.!?])\s+|\n+", text or "")
+        sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+|\n+", text or "")
                      if s.strip()]
         if not sentences:
             return ""
@@ -498,18 +820,35 @@ class ChatbotService:
             try:
                 memories = self.profile.retrieve(user_id, message)
                 contradictions = self.profile.contradiction_topics(user_id, message)
-            except Exception:
+            except Exception as exc:
+                log.error("derived memory retrieval failed: %s", type(exc).__name__)
                 memories, contradictions = [], []
+            # Stored memory is untrusted input: drop instruction-like records.
+            memories = [
+                m for m in memories if not self.guardrails.is_injection(m.text)
+            ]
+            contradictions = [
+                c for c in contradictions if not self.guardrails.is_injection(c)
+            ]
         # Summary is now refreshed unconditionally in handle() after every turn,
         # so no need to call _refresh_summary here.
         instructions = build_instructions(strategy)
         # The current turn has not been appended yet, so it appears exactly once
         # through `message` rather than being duplicated in recent history.
         history = self.cag.context.formatted_window(context_id)
-        try:
-            cross = self._cross_session_context(user_id, session_id, message)
-        except Exception:
-            cross = ""
+        # Cross-session text and summaries are external input, so instruction-like
+        # sentences are removed before assembly. These blocks are small and
+        # bounded. Documents are scrubbed once at ingestion instead, because
+        # scanning the whole knowledge context on every request is expensive.
+        # Minimization control: when disabled, prior-session background never
+        # crosses the provider boundary at all.
+        cross = ""
+        if self.settings.send_cross_session_context:
+            cross = self.guardrails.scrub_instruction_like(
+                self._cross_session_context(user_id, session_id, message))
+        summary = self.guardrails.scrub_instruction_like(
+            self.cag.context.summary(context_id)) or None
+        knowledge = lookup.knowledge_context if lookup else ""
         # A reference can point at a previous SESSION, not just an earlier turn
         # ("I'm exhausted from looking after her" as the first message of a new
         # session). The analyzer only sees in-session history, so widen the flag
@@ -521,9 +860,9 @@ class ChatbotService:
             except Exception:
                 pass
         input_text = build_model_input(
-            message, history, lookup.knowledge_context if lookup else "",
+            message, history, knowledge,
             memories=memories, contradictions=contradictions,
-            session_summary=self.cag.context.summary(context_id) or None,
+            session_summary=summary,
             knowledge_missing=bool(lookup and strategy.rag_required and not lookup.knowledge_hit),
             cross_session=cross,
             referential=referential,
@@ -550,12 +889,9 @@ class ChatbotService:
                 return ModerationSignal()
         return ModerationSignal()
 
-    def _archive(self, user_id, conversation_id, role, content) -> None:
-        if self.archive is not None:
-            try:
-                self.archive.record(user_id, conversation_id, role, content)
-            except Exception:
-                pass
+    def _archive(self, user_id, conversation_id, role, content):
+        """Legacy single-message write; durable errors intentionally propagate."""
+        return self.archive.record(user_id, conversation_id, role, content)
 
     @staticmethod
     def _context_id(user_id: str, session_id: str) -> str:
@@ -565,55 +901,61 @@ class ChatbotService:
             return session_id
         return f"{len(user_id)}:{user_id}{session_id}"
 
-    def _persist_safety_state(self, user_id: str, session_id: str,
-                              risk: RiskAssessment) -> None:
-        save = getattr(self.archive, "save_safety_state", None)
-        if callable(save):
-            try:
-                state = risk.to_dict()
-                # ISS-13 FIX: Also persist counters and summary for restart resilience.
-                context_id = self._context_id(user_id, session_id)
-                counters = self.cag.context.get_counters(context_id)
-                if counters:
-                    state["counters"] = counters
-                summary = self.cag.context.summary(context_id)
-                if summary:
-                    state["summary"] = summary
-                save(user_id, session_id, state)
-            except Exception:
-                pass
+    # Free-text observations the classifier produced about the user are the most
+    # sensitive part of inferred state and are never read back for behaviour, so
+    # only short internal category markers are persisted.
+    _STATE_MARKER = re.compile(r"^[a-z0-9_]+$")
+
+    @classmethod
+    def _minimize_state(cls, state: dict) -> dict:
+        evidence = state.get("evidence")
+        if isinstance(evidence, list):
+            state["evidence"] = [
+                item for item in evidence
+                if isinstance(item, str) and cls._STATE_MARKER.match(item)
+            ]
+        return state
+
+    def _persist_safety_state(
+        self, user_id: str, session_id: str, risk: RiskAssessment, *,
+        request_id: Optional[str] = None, memory_completed: bool = False,
+    ) -> None:
+        state = self._minimize_state(risk.to_dict())
+        context_id = self._context_id(user_id, session_id)
+        state["counters"] = self.cag.context.get_counters(context_id)
+        summary = self.cag.context.summary(context_id)
+        if summary:
+            state["summary"] = summary
+            state["summary_source"] = self.cag.context.summary_source(context_id)
+        self.archive.save_safety_state(
+            user_id, session_id, state,
+            completed_request_id=request_id,
+            memory_completed=memory_completed,
+        )
 
     def _ensure_context_loaded(self, user_id: str, session_id: str,
                                context_id: Optional[str] = None) -> None:
-        """Restore transcript and cumulative safety state for this owner/session."""
+        """Refresh transcript and derived state from the authoritative archive."""
         context_id = context_id or self._context_id(user_id, session_id)
-        if self.archive is None:
-            return
-        if not self.cag.context.all_cached(context_id):
-            try:
-                messages = self.archive.fetch_recent(
-                    user_id, session_id, limit=self.settings.context_cache_size)
-                if messages:
-                    turns = [Turn(role=m.role, content=m.content) for m in messages]
-                    self.cag.context.prime(context_id, turns)
-            except Exception:
-                pass
-        if not self.cag.context.safety_state(context_id):
-            load = getattr(self.archive, "load_safety_state", None)
-            if callable(load):
-                try:
-                    state = load(user_id, session_id)
-                    if state:
-                        self.cag.context.set_safety_state(context_id, state)
-                        # ISS-13 FIX: Restore counters and summary from persisted state.
-                        if "counters" in state:
-                            self.cag.context.restore_counters(
-                                context_id, state["counters"])
-                        if "summary" in state and state["summary"]:
-                            self.cag.context.set_summary(
-                                context_id, state["summary"])
-                except Exception:
-                    pass
+        messages = self.archive.fetch_recent(
+            user_id, session_id, limit=self.settings.context_cache_size)
+        turns = [Turn(role=m.role, content=m.content) for m in messages]
+        self.cag.context.replace_turns(context_id, turns)
+        state = self.archive.load_safety_state(user_id, session_id)
+        if state:
+            self.cag.context.set_safety_state(context_id, state)
+            if "counters" in state:
+                self.cag.context.restore_counters(context_id, state["counters"])
+            if state.get("summary"):
+                # Provenance survives rehydration; otherwise reused model text
+                # would be indistinguishable from the user's own words.
+                self.cag.context.set_summary(
+                    context_id, str(state["summary"]),
+                    source=str(state.get("summary_source") or "deterministic"))
+        else:
+            # No durable state: discard any process-local derived state left by
+            # a turn that never committed, so a retry decides from storage only.
+            self.cag.context.reset_derived(context_id)
 
     def _fallback(self, language: Language) -> str:
         if language == Language.HINDI:
@@ -642,7 +984,7 @@ def build_chatbot(settings: Optional[Settings] = None, *, client: Optional[LLMCl
 
     cag = CAGEngine(
         knowledge_dir=settings.knowledge_path,
-        cache_dir=settings.root / "cache",
+        cache_dir=settings.cache_path,
         token_budget=settings.knowledge_token_budget,
         context_cache_size=settings.context_cache_size,
         prompt_window=settings.prompt_window,
@@ -653,41 +995,21 @@ def build_chatbot(settings: Optional[Settings] = None, *, client: Optional[LLMCl
         except Exception:
             pass
 
-    # --- Storage: MongoDB if MONGO_URI configured, else JSON files ---
-    archive = None
-    profile = None
-    mongo_db = None
-
-    if settings.mongo_uri and settings.db_name:
-        try:
-            from app.storage.mongo_client import get_mongo_db
-            mongo_db = get_mongo_db(settings.mongo_uri, settings.db_name)
-        except Exception:
-            mongo_db = None
-
-    if mongo_db is not None:
-        # Production (Render): use MongoDB
-        try:
-            from app.storage.chat_archive_mongo import ChatArchiveMongo
-            archive = ChatArchiveMongo(mongo_db)
-        except Exception:
-            pass
-        try:
-            from app.memory.long_term_memory_mongo import LongTermMemoryMongo
-            profile = LongTermMemoryMongo(mongo_db)
-        except Exception:
-            profile = LongTermMemory(storage_dir=settings.root / "data" / "profiles")
+    # Exactly one authoritative backend is selected. Initialization failures are
+    # fatal; production must never split or silently fall back to local files.
+    settings.validate_storage()
+    if settings.storage_backend == "mongo":
+        from app.storage.mongo_client import get_mongo_db
+        from app.storage.chat_archive_mongo import ChatArchiveMongo
+        from app.memory.long_term_memory_mongo import LongTermMemoryMongo
+        mongo_db = get_mongo_db(settings.mongo_uri, settings.db_name)
+        archive = ChatArchiveMongo(mongo_db)
+        profile = LongTermMemoryMongo(mongo_db)
     else:
-        # Local development: use JSON files
-        profile = LongTermMemory(storage_dir=settings.root / "data" / "profiles")
-        try:
-            from app.storage.chat_archive_json import ChatArchiveJSON
-            archive = ChatArchiveJSON(settings.root / "data" / "chats")
-        except Exception:
-            pass
-
-    if profile is None:
-        profile = LongTermMemory(storage_dir=settings.root / "data" / "profiles")
+        from app.memory.long_term_memory_sqlite import LongTermMemorySQLite
+        archive_path = settings.root / "data" / "chat_archive.sqlite3"
+        archive = ChatArchive(archive_path)
+        profile = LongTermMemorySQLite(archive_path)
 
     response_builder = ResponseBuilder(settings, guardrails, refusal, crisis, client)
 
