@@ -193,7 +193,7 @@ Verification: reproduction showed the engine knew its sources while the result a
 
 ### SOLUTION-021 → ISSUE-021 — REPOSITORY-SIDE IMPLEMENTED AND VERIFIED (backup/restore + migration harness are an external gate)
 
-**Repository-side (closed).** `SCHEMA_VERSION` plus a `schema_version` table give a version of record, and `assert_schema_supported` refuses a database written by a newer release — the exact failure a rollback would hit silently. `find_orphans` / `reconcile_orphans` detect rows whose session parent is missing and restore the parent from the messages rather than deleting content, removing only unreplayable stale requests. Both run at startup and log only when a repair occurred. Five targeted tests; full suite 421 passed, 1 skipped, 89 subtests.
+**Repository-side (closed).** `SCHEMA_VERSION` plus a `schema_version` table give a version of record, and `assert_schema_supported` refuses a database written by a newer release — the exact failure a rollback would hit silently. `find_orphans` / `reconcile_orphans` detect rows whose session parent is missing and restore the parent from the messages rather than deleting content, removing only unreplayable stale requests. Both run at startup and log only when a repair occurred. Five targeted tests (`tests/test_final_audit_remediation.py::SchemaAndIntegrityTests`); full suite 510 passed, 2 skipped, 612 subtests (count current as of the 2026-09-01 session, which added the load-resilience suite).
 
 **External gate (not closed, needs:** automated backups with retention at least as long as the longest retention window; a verified restore drill on real infrastructure (procedure documented in `OPERATIONS.md`); a reversible migration harness — the version is recorded and guarded but no up/down scripts exist, as there is no second version yet; and equivalent version/reconciliation support for Mongo, which has neither.**)
 
@@ -2452,52 +2452,7 @@ The gate was unusable before this change: from a clean checkout with the product
 
 `tests/lanes.py` is now the single manifest of every test/diagnostic/operator entry point, recording for each one its command, kind, hermeticity, gate membership, whether pytest may import it, and a mandatory reason. `AUTHORITATIVE_COMMAND` names the one command that counts as current evidence. The root `conftest.py` derives its `collect_ignore` from the manifest, so `pytest .` no longer aborts on the self-`sys.exit()`ing root scripts and the ignore list cannot drift. The ISSUE-029 sandbox logic moved into `tests/sandbox.py` and is reused by `conftest.py` and by `test_all.py`/`test_audit.py`, which now bind a temporary project root before any `Settings` exists (proven by data/ mtime before/after) and fix a Windows cp1252 encoding crash. Every non-hermetic lane (`context_audit.py`, `smoke_live`, `smoke_staging`) refuses without an explicit opt-in and writes nothing when refused; `context_audit_results.json` is gitignored; `Test_Report.md` carries a staleness banner; `DEVELOPER_GUIDE.md` documents all lanes.
 
-Verified by `tests/test_entry_points.py` (17 tests / 52 subtests): manifest completeness, gate/manifest agreement, no non-hermetic lane in the gate, `pytest --collect-only .` succeeding with >400 tests and no `INTERNALERROR`, both diagnostics passing without touching `data/`, and every non-hermetic lane refusing without its opt-in. Full suite: 486 passed, 2 skipped, 206 subtests.
-
-**Priority / dependency gate:** P3 / `backlog`.
-
-**Immediate containment:** Publish one current test ledger and mark historical outputs stale/non-authoritative.
-
-**Durable remediation:** Create a single CI test manifest with explicit lanes, eligibility, artifacts, and freshness metadata; mark historical reports non-authoritative.
-
-**Intended outcome:** Remove the control gap for test entry points and historical outputs are fragmented outside default discovery while preserving fail-safe behavior, evidence, and rollback.
-
-**Affected components:** pytest.ini; test_all.py; test_audit.py; context_audit.py; historical reports.
-
-**Prerequisites:**
-- Confirm baseline reproduction for ISSUE-033 using synthetic or redacted evidence.
-- Assign an accountable owner and acceptance reviewer.
-- Preserve current data and audit evidence before migration.
-
-**Implementation risks:**
-- A stricter control can reduce availability or create false positives if introduced without staged measurement.
-- Changes can alter compatibility across SQLite/Mongo, workers, or existing identities/context.
-
-**Migration concerns:**
-- Inventory existing affected records/configuration/state and define deterministic handling for legacy values.
-- Avoid silently reclassifying, deleting, or exposing existing sensitive data.
-
-**Rollback considerations:**
-- Use a versioned, reversible rollout with the previous behavior/configuration retained only for emergency rollback.
-- Rollback must not restore exposed secrets, unsafe data, or already-invalidated identity material.
-
-**Automated verification:**
-- Compare pytest discovery configuration with the generated catalog paths.
-- Add a regression test linked to ISSUE-033 that fails before and passes after remediation.
-- Run backend/worker/failure variants applicable to the affected trace IDs: EP-PYTEST, EP-ROOT-ALL, EP-ROOT-AUDIT, EP-CONTEXT-AUDIT
-
-**Manual review:**
-- Engineering owner reviews evidence and rollback readiness.
-- Independent test reviewer confirms the new evidence exercises the intended runtime boundary.
-
-**Acceptance evidence:**
-- Passing targeted unit and property tests with retained output.
-- Passing integration/failure-injection evidence in a hermetic environment.
-- Reviewer sign-off that issue trigger conditions no longer produce the documented impact.
-
-**Residual risk:** Residual risk remains until production-equivalent validation, monitoring, and rollback evidence are complete; external-provider/platform behavior remains outside this repository-only audit.
-
-**Validation limits:** No live external service, production data, or production deployment may be used as acceptance evidence in this audit run.
+Verified by `tests/test_entry_points.py` (17 tests / 63 subtests): manifest completeness, gate/manifest agreement, no non-hermetic lane in the gate, `pytest --collect-only .` succeeding with >400 tests and no `INTERNALERROR`, both diagnostics passing without touching `data/`, and every non-hermetic lane refusing without its opt-in. Full suite: 510 passed, 2 skipped, 612 subtests. (Subtest counts are current as of the 2026-09-01 session, which added the `load-harness` and `redteam-crisis` diagnostic lanes to the manifest and the load-resilience suite; both new lanes are classified and documented, which is what keeps `test_entry_points.py` green.)
 
 ## Residual Risk and Validation Limits
 
