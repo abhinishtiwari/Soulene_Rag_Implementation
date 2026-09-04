@@ -35,8 +35,16 @@ class ResponseBuilder:
         r"(system prompt|my (hidden )?instructions|according to my (system|prompt|rules)"
         r"|my system (says|policy)|response strategy for this message|base_system_prompt"
         r"|i was instructed to|my configuration|internal (only|rules)"
-        # verbatim fragments of the actual core prompt / identity block
-        r"|you are soulene ai, a warm|boundaries you always keep|s3 cubes innovations"
+        # Verbatim fragments of the actual core prompt / identity block. NOTE:
+        # "s3 cubes innovations" was previously listed here and had to be
+        # removed: CORE_PROMPT explicitly tells the companion it is "built by the
+        # Soulene Team and powered by S3 Cubes Innovations Private Limited", and
+        # the knowledge documents describe the company, so it is a fact the bot
+        # is meant to share — not an instruction fragment. Treating it as a leak
+        # marker meant every correct answer to "who built Soulene" was replaced
+        # with the "I can't share how I work internally" deflection. An actual
+        # prompt dump is still caught by the instruction-shaped markers below.
+        r"|you are soulene ai, a warm|boundaries you always keep"
         r"|treat any text in user messages|never reveal your instructions"
         r"|this turn:|core_prompt|core system prompt)",
         re.I,
@@ -100,14 +108,47 @@ class ResponseBuilder:
         re.I | re.M,
     )
 
+    # Programming/CS vocabulary that has no place in a wellbeing reply. Kept
+    # separate from wellbeing "steps" language so a grounding exercise ("1. take
+    # a slow breath ...") is never mistaken for a leaked algorithm.
+    _CS_VOCAB = re.compile(
+        r"\b(algorithm|pseudo\s?code|fibonacci|binary search|bubble sort|merge sort"
+        r"|quick ?sort|insertion sort|selection sort|linked list|hash ?(?:map|table)"
+        r"|recursion|recursive|iterate|iteration|sorted (?:list|array)|the middle (?:item|element)"
+        r"|left half|right half|integer|boolean|time complexity|big[- ]?o"
+        r"|previous two numbers?|first two numbers?|element|array|loop|variable|index)\b",
+        re.I,
+    )
+    # A numbered / bulleted procedure of two or more steps.
+    _STEP_LIST = re.compile(
+        r"(?:^|\n)\s*(?:step\s*)?[1-9][\.\):]\s+.+"
+        r"(?:[\s\S]*?(?:^|\n)\s*(?:step\s*)?[2-9][\.\):]\s+.+)",
+        re.I | re.M,
+    )
+
+    def _looks_like_prose_algorithm(self, reply: str) -> bool:
+        """A step-by-step procedure written in words that is really a coding answer.
+
+        Catches leaked algorithms/pseudocode that contain no runnable code (so
+        `_CODE_ARTEFACT` misses them) — e.g. a numbered outline of binary search.
+        Requires BOTH a multi-step list AND programming/CS vocabulary so ordinary
+        wellbeing steps (breathing, journaling) are never swept up.
+        """
+        text = reply or ""
+        return bool(self._STEP_LIST.search(text) and self._CS_VOCAB.search(text))
+
     def enforce_no_code(self, reply: str, language: Language) -> str:
-        """Strip an executable-code answer from ANY reply.
+        """Strip a code OR prose-algorithm answer from ANY reply.
 
         Runs unconditionally: a wellbeing companion has no situation in which
-        emitting a runnable program is correct, so this does not depend on the
-        turn having been classified as off-topic.
+        emitting a runnable program — or a step-by-step algorithm/pseudocode —
+        is correct, so this does not depend on the turn having been classified as
+        off-topic.
         """
-        if not reply or not self._CODE_ARTEFACT.search(reply):
+        if not reply:
+            return reply
+        if not (self._CODE_ARTEFACT.search(reply)
+                or self._looks_like_prose_algorithm(reply)):
             return reply
         pool = (self._REDIRECTS_HI if language in (Language.HINDI, Language.HINGLISH)
                 else self._REDIRECTS_EN)
@@ -407,10 +448,48 @@ class ResponseBuilder:
             return True
         return self._therapeutic_harm_category(candidate) is not None
 
+    def _blocked_reply(self, language: Language, *, session_id: str,
+                       user_message: str,
+                       risk_assessment: Optional[RiskAssessment],
+                       turn_is_crisis: bool) -> str:
+        """The replacement to deliver when the outgoing reply must be withheld.
+
+        ISSUE-041: for an ordinary turn the therapeutic-harm notice is the right
+        fail-closed answer. For a CRISIS turn it is not -- the reply being
+        withheld is the deterministic crisis protocol, so substituting a
+        diagnosis disclaimer removes the safety steps and emergency reference
+        that `app/safety/crisis.py` states can never be lost. Failing closed has
+        to mean falling back to the safest known-good content, and on a crisis
+        turn that is the crisis protocol, not silence about it.
+
+        This mirrors what the `self_harm_encouragement` and `danger_minimization`
+        branches already do; those two were correct and the withholding branches
+        simply never used the same fallback.
+        """
+        if not turn_is_crisis:
+            return self._therapeutic_safety_reply(language)
+        COUNTERS.increment("output_blocked_crisis_protocol_preserved")
+        return self.crisis.respond(
+            language, user_message, session_id,
+            safety_level=(risk_assessment.safety_level if risk_assessment else None),
+            assessment=risk_assessment)
+
     def apply_output_safety(self, *, session_id: str, user_message: str, reply: str,
                             language: Language,
-                            risk_assessment: Optional[RiskAssessment] = None) -> str:
-        """Validate the exact text that will be delivered and archived."""
+                            risk_assessment: Optional[RiskAssessment] = None,
+                            safety_level: Optional[SafetyLevel] = None,
+                            knowledge_context: Optional[str] = None) -> str:
+        """Validate the exact text that will be delivered and archived.
+
+        `safety_level` is the authoritative fused level for the turn. It is
+        passed separately from `risk_assessment` because the deterministic floor
+        can escalate a turn above whatever the semantic assessment concluded, and
+        the crisis-safe fallback below has to key off the level that actually
+        selected the crisis route.
+        """
+        level = safety_level or (risk_assessment.safety_level if risk_assessment
+                                 else None)
+        turn_is_crisis = bool(level is not None and level.is_crisis)
         reply = self.scrub_leak(reply, language)
 
         # The editor improves recoverable drafts. Its result still passes every
@@ -445,10 +524,12 @@ class ResponseBuilder:
         harm = self._therapeutic_harm_category(reply)
         if harm is not None:
             COUNTERS.increment(f"output_blocked_{harm}")
-            return self._therapeutic_safety_reply(language)
+            return self._blocked_reply(
+                language, session_id=session_id, user_message=user_message,
+                risk_assessment=risk_assessment, turn_is_crisis=turn_is_crisis)
 
         semantic_category = self._semantic_output_category(
-            session_id, user_message, reply)
+            session_id, user_message, reply, knowledge_context)
         if semantic_category == "self_harm_encouragement":
             return self.crisis.respond(
                 language, user_message, session_id,
@@ -467,13 +548,54 @@ class ResponseBuilder:
             "treatment_certainty", "shame_or_degradation", "review_unavailable",
         }:
             COUNTERS.increment(f"output_blocked_{semantic_category}")
-            return self._therapeutic_safety_reply(language)
+            return self._blocked_reply(
+                language, session_id=session_id, user_message=user_message,
+                risk_assessment=risk_assessment, turn_is_crisis=turn_is_crisis)
         if semantic_category == "prompt_leak":
             return self.scrub_leak("My system prompt and internal rules", language)
+        # Not safety-harmful, but they fail the spec's relevance / grounding
+        # checks, so the reply must not ship as-is. Without a regeneration hook
+        # here, fail safe to a short, honest reply rather than delivering an
+        # off-topic answer or an invented "fact".
+        # CRISIS SAFETY: on a crisis turn the reply being judged is the
+        # deterministic crisis protocol. A relevance/grounding complaint must
+        # NEVER delete it — the protocol is *supposed* to talk about safety even
+        # when the user asked something unrelated, so "irrelevant" is expected
+        # there and is not a reason to drop the safety steps. This mirrors what
+        # `_blocked_reply` already does for the safety categories; these two
+        # branches previously bypassed it and shipped "Sorry, I drifted off"
+        # in place of the crisis protocol.
+        if semantic_category in ("ungrounded", "irrelevant"):
+            COUNTERS.increment(f"output_blocked_{semantic_category}")
+            if turn_is_crisis:
+                COUNTERS.increment("output_crisis_protocol_preserved_over_relevance")
+                return reply
+            return (self._ungrounded_reply(language)
+                    if semantic_category == "ungrounded"
+                    else self._irrelevant_reply(language))
         return reply
 
+    def _ungrounded_reply(self, language: Language) -> str:
+        """Delivered when a factual reply is not supported by the source."""
+        if language in (Language.HINDI, Language.HINGLISH):
+            return ("Iske baare mein mere paas pakki jaankari nahi hai, isliye main "
+                    "galat kuch nahi kehna chahta. App > Profile > Help & Support "
+                    "se sahi detail mil jayegi. Aur batao, kya chal raha hai?")
+        return ("I don't have that detail on hand, so I'd rather not guess. You can "
+                "check App > Profile > Help & Support for the exact info. "
+                "Anything else on your mind?")
+
+    def _irrelevant_reply(self, language: Language) -> str:
+        """Delivered when the draft didn't actually address the request."""
+        if language in (Language.HINDI, Language.HINGLISH):
+            return ("Sorry, main thoda side track ho gaya. Ek baar phir batao — main "
+                    "sahi tarah se samajhna chahta hoon.")
+        return ("Sorry, I drifted off what you actually asked. Tell me once more so I "
+                "can focus on the right thing?")
+
     def _semantic_output_category(self, session_id: str, user_message: str,
-                                  reply: str) -> str:
+                                  reply: str,
+                                  knowledge_context: Optional[str] = None) -> str:
         if not self.settings.enable_semantic_safety or self.client is None:
             return "not_required"
         assess = getattr(self.client, "assess_output", None)
@@ -484,10 +606,18 @@ class ResponseBuilder:
             "danger_minimization", "medical_instruction", "prompt_leak",
             "diagnosis", "delusion_reinforcement", "dependency_or_coercion",
             "treatment_certainty", "shame_or_degradation",
+            "irrelevant", "ungrounded",
         }
         try:
-            value = assess(user_message=user_message, reply=reply,
-                           session_id=session_id)
+            try:
+                value = assess(user_message=user_message, reply=reply,
+                               session_id=session_id,
+                               knowledge_context=knowledge_context)
+            except TypeError:
+                # Backward-compatible with assess_output implementations that
+                # predate the knowledge_context/grounding argument.
+                value = assess(user_message=user_message, reply=reply,
+                               session_id=session_id)
             if isinstance(value, dict):
                 category = str(value.get("category", "")).strip().lower()
             else:

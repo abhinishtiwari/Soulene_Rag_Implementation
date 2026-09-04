@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
+from typing import Optional
 from pathlib import Path
 
 
@@ -178,6 +179,12 @@ class Settings:
 
     # --- Paths (relative to PROJECT_ROOT) ---
     knowledge_dir: str = "knowledge"
+    # Comma-separated top-level knowledge folders that retrieval is scoped to.
+    # Anything outside these (e.g. a large clinical `books/` reference library)
+    # stays on disk but is never indexed or retrieved: it keeps the corpus inside
+    # the preload budget and keeps clinical/diagnostic material out of a
+    # companion reply. Empty string means "index every folder" (legacy).
+    knowledge_include_types: str = "soulene,mental_health"
     cache_dir: str = "cache"
     vector_store_dir: str = "vector_store"
     # When set, declares the durable mount. Startup then requires that every
@@ -197,6 +204,13 @@ class Settings:
     @property
     def knowledge_path(self) -> Path:
         return PROJECT_ROOT / self.knowledge_dir
+
+    @property
+    def knowledge_include_type_set(self) -> Optional[list]:
+        """Parsed include-list, or None when empty (index every folder)."""
+        items = [t.strip() for t in self.knowledge_include_types.split(",")
+                 if t.strip()]
+        return items or None
 
     @property
     def cache_path(self) -> Path:
@@ -299,6 +313,8 @@ class Settings:
             emergency_number=_get(env, "EMERGENCY_NUMBER", cls.emergency_number),
             emergency_locale=_get(env, "EMERGENCY_LOCALE", cls.emergency_locale),
             knowledge_dir=_get(env, "KNOWLEDGE_DIR", cls.knowledge_dir),
+            knowledge_include_types=_get(
+                env, "KNOWLEDGE_INCLUDE_TYPES", cls.knowledge_include_types),
             cache_dir=_get(env, "CACHE_DIR", cls.cache_dir),
             persistent_root=_get(env, "PERSISTENT_ROOT", cls.persistent_root),
             storage_backend=_get(env, "STORAGE_BACKEND", cls.storage_backend).lower(),

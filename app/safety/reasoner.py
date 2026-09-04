@@ -49,15 +49,68 @@ unless the conversation gives affirmative evidence that the danger ended; when
 the user states they have left the hazard, are with someone, or were not
 serious, treat that as such evidence and set danger_resolved.
 
-Judge the ACT, not the story around it. Claimed superpowers, flight, invincibility,
-dreams, jokes, bets, dares, roleplay and "hypothetically" never make a physically
-irreversible action safe: leaving a height, entering traffic or water, or the same
-act attributed to friends is assessed exactly as if stated plainly, and the framing
-itself is reported in hazards. Equally, do not invent danger: ordinary emotional
-vocabulary ("on edge", "shaking", "drained", "exhausted", "high hopes", routine
-medication, drinking water) is distress or neutral speech, not physical danger.
-Report physical_danger_score above zero only when a physical hazard is actually
-described.
+Physical danger is about the PERSON's state and intent, not about whether a
+hazard-adjacent word (water, height, roof, road, traffic, pills, knife, car)
+appears. Naming or being near such a thing is ordinary life: people swim, drive,
+cook, climb, take medication and stand on balconies every day. Set
+physical_danger_score high ONLY when the message actually evidences that the
+person is about to be, or already is being, physically harmed. Look for:
+  - self-harm intent or a wish to die tied to the act ("jump to end it",
+    "drive into the wall so it stops");
+  - acute distress or hopelessness driving them toward the act right now;
+  - impaired judgment or loss of control (intoxicated, dissociating, "can't
+    stop myself");
+  - an emergency already in progress (drowning, bleeding, trapped, can't get
+    out, someone about to fall);
+  - a described intent to do something irreversible imminently.
+When none of these are present, the same words describe normal activity and
+physical_danger_score stays at or near zero: "going to the pool", "I can't swim",
+"I'm going to dive in", "driving to work", "standing on the balcony for air",
+"I take my BP tablet at night", "cooking with a knife" are neutral. Do not infer
+danger from inability, novelty or routine risk alone ("I can't swim" is a fact
+about a skill, not a drowning). Framing that tries to hide real intent
+(superpowers, "just a joke", roleplay, dares, "hypothetically") never lowers a
+danger that the intent/distress signals above establish, and is reported in
+hazards; but such framing does not by itself create danger where those signals
+are absent. Ordinary emotional vocabulary ("on edge", "shaking", "drained",
+"high hopes") is distress or neutral speech, not physical danger.
+
+Set "scope" by the MEANING of what the person wants, not by keywords. "in_scope"
+= anything a warm wellbeing companion should engage: mental wellbeing and
+emotional support, gentle mental-health education, stress and hard feelings,
+self-reflection, coping and everyday wellbeing, personal experiences, and
+ordinary day-to-day life conversation (plans, a swim, family, a rough day).
+"out_of_scope" = requests that belong to a general-purpose assistant, not a
+wellbeing companion: writing or debugging code, algorithms, technical/IT help,
+math or homework solutions, trivia and general knowledge lookups, financial or
+legal how-tos, drafting documents, product research, and similar task work.
+Judge intent, so a reworded off-topic ask with no obvious keyword is still
+out_of_scope, and an in-scope feeling with no "mental health" words is still
+in_scope. One important exception: when someone is venting about or emotionally
+struggling with an off-topic thing ("this coding assignment is crushing me",
+"the exam math is stressing me out"), the REAL request is emotional support —
+mark that in_scope. Use "unclear" only when you genuinely cannot tell.
+
+Set "knowledge_need" by whether answering WELL requires Soulene's own reference
+material, judged by intent rather than wording. "soulene" = they are asking about
+Soulene itself or about S3 Cubes Innovations, the company behind it (both are
+described in the provided material): what it is, who built or owns it, how it
+works, its services, plans, pricing, features, mentors or programmes. "mental_health" = they want information or a practice from
+reference material: what a condition or concept means, how to cope with
+something, or a concrete exercise/technique (breathing, grounding, journaling).
+"none" = ordinary conversation, sharing feelings, venting, greetings, day-to-day
+chat — a warm reply needs no document lookup, and retrieving one would be wrong.
+Someone simply expressing distress is "none"; someone asking "what helps with
+panic?" is "mental_health". Use "unclear" only when you genuinely cannot tell.
+
+Set "request_kind" to "helpline" when the person is asking for a number or
+someone to contact for urgent help, however they word it ("who do I call if I'm
+not safe tonight", "is there someone I can phone right now", "give me a number
+for urgent help") — the number is supplied from configuration, so recognising the
+ask matters more than the words used. Set it to "identity" when they are asking
+what or who you are, or who made you ("so what exactly are you", "are you a real
+person or a program", "who's behind this app"). Otherwise "none". Someone in
+distress who is NOT asking for a contact is "none".
 
 Return only one JSON object. Do not provide reasoning or advice. Scores are 0..1.
 Use this exact shape:
@@ -71,6 +124,9 @@ Use this exact shape:
 "isolation":false,"farewell_or_finality":false,"hopelessness":false,
 "unsafe_framing":false,"prompt_injection":false,"danger_resolved":false,
 "latest_message_acute":true,"risk_subject":"self|other|unclear",
+"scope":"in_scope|out_of_scope|unclear",
+"knowledge_need":"none|soulene|mental_health|unclear",
+"request_kind":"none|helpline|identity",
 "recommended_action":"normal|support|urgent_safety|emergency|refuse_harmful|"
 "refuse_sexual","immediate_actions":[],"uncertainty":0}
 
@@ -106,6 +162,13 @@ class ConversationRiskReasoner:
         self.client = client
         # Per-assessment flag: did this turn supply risk-reducing information?
         self._reassured = False
+        # Per-assessment flag: does THIS turn carry no acute risk signal of its
+        # own (a benign topic change / ordinary message)? Distinct from
+        # `_reassured`, which needs an explicit "I'm safe now" style phrase. A
+        # benign pivot does not clear risk, but it lets carried risk decay
+        # quickly so a single safety trigger cannot latch the whole conversation
+        # into crisis mode. Fresh acute evidence in the same turn overrides it.
+        self._benign_pivot = False
 
     def assess(self, *, session_id: str, latest_message: str,
                history: List[Turn], moderation: ModerationSignal,
@@ -118,6 +181,19 @@ class ConversationRiskReasoner:
             self._SAFETY_AFFIRMED.search(latest_message or "")
             and floor in (SafetyLevel.SAFE, SafetyLevel.EMOTIONAL_DISTRESS)
             and not self._RISKY_ACTIVITY.search((latest_message or "").lower()))
+        # A benign pivot: this turn shows no acute signal of its own. It does not
+        # require the user to say "I'm safe" — an ordinary message on a new topic
+        # ("hi", "suggest a tablet for my headache", "I'm going to a water park")
+        # qualifies. This is what lets carried crisis risk decay across a genuine
+        # topic change instead of latching. Any physical-danger signal or a
+        # non-SAFE/-distress floor disqualifies it, so real danger never counts
+        # as a pivot.
+        turn_signals = self._signals(latest_message)
+        self._benign_pivot = bool(
+            floor in (SafetyLevel.SAFE, SafetyLevel.EMOTIONAL_DISTRESS)
+            and not any(turn_signals[k] for k in (
+                "location", "barrier", "impairment", "substance",
+                "activity", "question")))
         raw: Dict[str, Any] = {}
         source = "deterministic"
         degraded = False
@@ -143,14 +219,24 @@ class ConversationRiskReasoner:
         result = self._parse(raw)
         result.source = source
 
-        # --- Deterministic contextual danger detection ---
-        # Scans conversation history for physical/environmental danger signals
-        # that compound with the current message. This works even without the
-        # LLM semantic classifier, ensuring danger awareness is never lost.
-        self._apply_contextual_danger(result, latest_message, history, previous)
+        # --- Deterministic contextual danger: alongside the LLM, but CAPPED
+        #     WHEN THE LLM DISAGREES (not primary logic when the LLM works) ---
+        # The scanner (contextual danger via _RECREATION_CONTEXT /
+        # _RISKY_ACTIVITY / _DANGEROUS_LOCATION) runs every turn so a compound
+        # physical danger the classifier under-scores is never missed. But when
+        # the LLM produced a usable assessment (`raw`) and did NOT itself flag
+        # danger, the LLM stays the authority: the scanner may then only raise
+        # concern to a gentle SELF_HARM_CONCERN check-in, never the full
+        # emergency protocol, UNLESS its finding is corroborated by an
+        # independent signal (see `_apply_contextual_danger`). This is the
+        # "meaning over keywords" contract — the regex net acts only when the
+        # LLM is unavailable or disagrees, not when it is working and agrees.
+        self._apply_contextual_danger(
+            result, latest_message, history, previous,
+            llm_authoritative=bool(raw))
 
-        # Without a semantic result the only remaining multi-turn signal is
-        # deterministic, so apply an explicit trajectory floor.
+        # The trajectory floor remains FALLBACK-ONLY: it is the sole multi-turn
+        # signal when there is no semantic result at all.
         if not raw:
             self._apply_trajectory_floor(
                 result, latest_message, history, degraded=degraded)
@@ -322,6 +408,18 @@ class ConversationRiskReasoner:
     _RISKY_QUESTION = re.compile(
         r"\b(can i|should i|what if i|what happens if i|would it be|"
         r"is it (?:safe|okay|ok|fine) (?:to|if)|dare me to)\b", re.I)
+    # Ordinary recreation / leisure context. When an activity word like "dive"
+    # or "jump" appears here it is almost certainly a normal outing, not a
+    # self-harm act. This does NOT clear risk on its own — it only prevents the
+    # contextual-danger path from manufacturing a physical-danger verdict from a
+    # benign recreational message. A dangerous height, self-harm intent, or an
+    # explicit crisis floor still overrides it (see _apply_contextual_danger).
+    _RECREATION_CONTEXT = re.compile(
+        r"\b(water\s*park|swimming\s*pool|\bpool\b|beach|lake\s+day|resort|holiday|vacation"
+        r"|water\s+slide|slide|amusement\s*park|theme\s*park|fun\s*park|aqua\s*park"
+        r"|diving\s+board|diving\s+pool|scuba|snorkel(?:ing)?|swim(?:ming)?|splash"
+        r"|trip|outing|picnic|hang(?:ing)?\s+out|with\s+(?:my\s+)?friends?|friend'?s?\s+(?:house|place|ghar)"
+        r"|water\s+park\s+ja|park\s+ja)\b", re.I)
     # Information from the user that genuinely reduces risk: they have left the
     # hazard, they are with someone, or they are correcting a misreading. This
     # accelerates de-escalation but never clears risk outright, and it is always
@@ -369,12 +467,14 @@ class ConversationRiskReasoner:
             "activity": bool(self._RISKY_ACTIVITY.search(low)),
             "question": bool(self._RISKY_QUESTION.search(low)),
             "framing": bool(self._UNREAL_FRAMING.search(low)),
+            "recreation": bool(self._RECREATION_CONTEXT.search(low)),
         }
 
     def _apply_contextual_danger(self, result: RiskAssessment,
                                   latest_message: str,
                                   history: List[Turn],
-                                  previous: Optional[RiskAssessment] = None) -> None:
+                                  previous: Optional[RiskAssessment] = None,
+                                  *, llm_authoritative: bool = False) -> None:
         """Detect compound physical danger for the CURRENT episode.
 
         Two competing requirements are balanced here:
@@ -388,9 +488,28 @@ class ConversationRiskReasoner:
         a signal of its own, or an unresolved acute risk carried in the prior
         state. Otherwise the accumulated picture is treated as history, not as a
         live situation.
+
+        `llm_authoritative` is True when a usable semantic assessment exists for
+        this turn. In that case the scanner is CAPPED when it disagrees with the
+        LLM (LLM saw no danger but the scanner does): its escalation is limited
+        to a gentle SELF_HARM_CONCERN check-in rather than the full physical-
+        danger emergency, UNLESS an independent signal corroborates it. When the
+        LLM is unavailable (`llm_authoritative` False), the scanner is the sole
+        authority and is not capped.
         """
         recent_user = [t.content for t in history if t.role == "user"][-6:]
         latest_lower = latest_message.lower()
+
+        # Capture the LLM's own physical/self-harm verdict BEFORE the scanner
+        # raises anything, so a disagreement can be detected at the exit.
+        llm_physical_in = result.physical_danger_score
+        llm_self_harm_in = result.self_harm_score
+        llm_semantic_in = result.semantic_intent
+        # Snapshot physical evidence present at entry (from the LLM or carried
+        # state). If the cap fires, only evidence THIS scanner run adds is
+        # withdrawn; anything already here is left untouched.
+        hazards_at_entry = set(result.hazards)
+        access_to_means_at_entry = result.access_to_means
 
         now = self._signals(latest_message)
         hist = self._signals(" ".join(recent_user)) if recent_user else {
@@ -407,6 +526,19 @@ class ConversationRiskReasoner:
                              "activity", "question"))
         episode_live = current_contributes or prior_acute >= 0.40
         if not episode_live:
+            return
+
+        # Recreation carve-out: when THIS turn is clearly a benign outing
+        # ("water park with my friends", "going for a swim") and it introduces no
+        # dangerous location of its own and no crisis-level floor, do not let a
+        # carried prior score manufacture a fresh physical-danger verdict for it.
+        # This is what stops "I'm going to dive" (at a water park) being read as a
+        # fall/self-harm act. A real hazard on THIS turn (a rooftop, a self-harm
+        # floor, or an explicit risky location) is never suppressed, so
+        # "I'll dive off the roof to end it" still escalates normally.
+        if (now["recreation"] and not now["location"]
+                and not self.guardrails.assess_safety_level(
+                    latest_message, ModerationSignal()).is_crisis):
             return
 
         # Union of this turn and the recent window, but only while live.
@@ -533,6 +665,50 @@ class ConversationRiskReasoner:
         if danger_signals >= 4:
             result.physical_danger_score = max(result.physical_danger_score, 0.85)
 
+        # --- CAP WHEN THE LLM DISAGREES (not primary logic when LLM works) ---
+        # If a usable LLM assessment exists and the LLM itself did NOT flag
+        # danger, the LLM stays the authority. The scanner's own escalation is
+        # then capped to a gentle SELF_HARM_CONCERN check-in ("are you safe right
+        # now?") rather than the full physical-danger emergency protocol —
+        # UNLESS an independent signal corroborates the scanner's finding, in
+        # which case full escalation stands ("combines with something else").
+        # When no LLM verdict exists (`llm_authoritative` False) the scanner is
+        # the sole authority and is never capped.
+        llm_flagged_danger = (
+            llm_physical_in >= 0.55
+            or llm_self_harm_in >= 0.42
+            or llm_semantic_in in ("implicit_self_harm", "explicit_self_harm",
+                                   "physical_danger", "harm_to_others"))
+        scanner_escalated = result.physical_danger_score > max(llm_physical_in, 0.37)
+        if llm_authoritative and not llm_flagged_danger and scanner_escalated:
+            floor_now = self.guardrails.assess_safety_level(
+                latest_message, ModerationSignal())
+            corroborated = (
+                floor_now != SafetyLevel.SAFE
+                or llm_self_harm_in >= 0.25
+                or result.hopelessness or result.farewell_or_finality
+                or len(result.compound_factors) >= 3)
+            if not corroborated:
+                # Scanner and a working LLM disagree with nothing to back the
+                # scanner: hold it to a check-in, below the physical-danger gate.
+                result.physical_danger_score = min(
+                    result.physical_danger_score, 0.37)
+                result.self_harm_score = max(result.self_harm_score, 0.42)
+                # Withdraw the physical EVIDENCE this scanner run added, so the
+                # hazard-label boost in _fuse cannot re-inflate past the cap from
+                # a label the cap just decided not to assert (e.g. "fall_risk").
+                # Only labels/flags NEW this turn are removed; anything the LLM
+                # or prior state supplied is left intact. _fuse's boost logic is
+                # unchanged — it simply no longer sees a withdrawn label.
+                result.hazards = [h for h in result.hazards
+                                  if h in hazards_at_entry]
+                if not access_to_means_at_entry:
+                    result.access_to_means = False
+                if "contextual_danger_capped_llm_disagreed" not in result.compound_factors:
+                    result.compound_factors.append(
+                        "contextual_danger_capped_llm_disagreed")
+                COUNTERS.increment("contextual_danger_capped")
+
     def _bounded_transcript(self, history: List[Turn], latest: str) -> List[dict]:
         rows = [{"role": t.role, "content": (t.content or "")[:4000]} for t in history]
         rows.append({"role": "user", "content": latest[:4000]})
@@ -632,6 +808,16 @@ class ConversationRiskReasoner:
             risk_subject=(str(raw.get("risk_subject", "self")).lower()
                           if str(raw.get("risk_subject", "self")).lower()
                           in ("self", "other", "unclear") else "self"),
+            scope=(str(raw.get("scope", "unclear")).lower()
+                   if str(raw.get("scope", "unclear")).lower()
+                   in ("in_scope", "out_of_scope", "unclear") else "unclear"),
+            knowledge_need=(str(raw.get("knowledge_need", "unclear")).lower()
+                            if str(raw.get("knowledge_need", "unclear")).lower()
+                            in ("none", "soulene", "mental_health", "unclear")
+                            else "unclear"),
+            request_kind=(str(raw.get("request_kind", "none")).lower()
+                          if str(raw.get("request_kind", "none")).lower()
+                          in ("none", "helpline", "identity") else "none"),
         )
 
     def _from_state(self, state: Dict[str, object]) -> Optional[RiskAssessment]:
@@ -660,6 +846,16 @@ class ConversationRiskReasoner:
             current.physical_danger_score = max(current.physical_danger_score, 0.75)
         elif deterministic_floor == SafetyLevel.EMOTIONAL_DISTRESS:
             current.emotional_distress_score = max(current.emotional_distress_score, 0.50)
+
+        # Snapshot the model's OWN verdict before any label-derived inference
+        # runs below. Corroboration for the hazard-label boost must never be a
+        # flag that the labels themselves just set, or a single label would
+        # corroborate itself into an emergency.
+        pre_label_physical = current.physical_danger_score
+        pre_label_self_harm = current.self_harm_score
+        pre_label_means = current.access_to_means
+        pre_label_timing = current.timing_immediate
+        pre_label_intox = current.intoxication_or_impairment
 
         # --- Infer boolean flags from hazard/compound labels ---
         # Models often return the concept as a label but omit the boolean flag.
@@ -709,8 +905,38 @@ class ConversationRiskReasoner:
             floor_pd = 0.35 + 0.12 * min(3, physical_signal_count)
             if current.intoxication_or_impairment:
                 floor_pd += 0.15
+            boosted = min(1.0, floor_pd)
+            # CAPPED WHEN THE MODEL'S OWN SCORE DISAGREES (label is not primary).
+            # The boost exists to rescue a hazard the model labelled but
+            # under-scored. Left uncapped it inverts that: because its minimum is
+            # 0.47 and `_derive_level` accepts `bool(hazards)` as corroboration
+            # for a moderate score, ONE free-text label could manufacture a
+            # PHYSICAL_DANGER emergency while the model's own score said there
+            # was no danger — the label corroborating itself. So when the model
+            # scored below the moderate gate and nothing INDEPENDENT backs the
+            # label, hold the boost just under that gate. Genuine compound danger
+            # the model under-scores is still caught by
+            # `_apply_contextual_danger`, which raises its own capped check-in.
+            if pre_label_physical < 0.38:
+                # Corroboration must be evidence of the SAME KIND (physical or
+                # self-harm), matching the rule `_derive_level` already follows.
+                # An EMOTIONAL_DISTRESS floor is not evidence of physical danger:
+                # accepting it let "heavy traffic" (distress-matched on "heavy")
+                # lift the cap and turn a commute into an emergency.
+                corroborated = (
+                    deterministic_floor in (
+                        SafetyLevel.PHYSICAL_DANGER, SafetyLevel.ABUSE_OR_DANGER,
+                        SafetyLevel.SELF_HARM_CONCERN,
+                        SafetyLevel.IMMINENT_SELF_HARM,
+                        SafetyLevel.HARM_TO_OTHERS)
+                    or pre_label_self_harm >= 0.25
+                    or pre_label_timing or pre_label_means or pre_label_intox
+                    or current.hopelessness or current.farewell_or_finality)
+                if not corroborated:
+                    boosted = min(boosted, 0.37)
+                    COUNTERS.increment("hazard_label_boost_capped")
             current.physical_danger_score = max(current.physical_danger_score,
-                                                min(1.0, floor_pd))
+                                                boosted)
 
         # Decide whether THIS turn is acute, which drives graceful step-down:
         # an acute moment gets the full safety protocol; a calm or topic-changed
@@ -734,7 +960,18 @@ class ConversationRiskReasoner:
             or current.harm_to_others_score >= 0.62
             or moderate_physical_now
             or (current.intoxication_or_impairment and current.hopelessness))
-        current.acute_now = hard_acute or bool(current.acute_now)
+        # A benign pivot with no hard-acute signal is NOT acute this turn, even
+        # though background risk may still be carried. This lets the responder
+        # take the warm `gentle_followup` step-down instead of replaying the full
+        # emergency script — and it works on the deterministic-only path, where
+        # `current.acute_now` would otherwise default True and stay latched.
+        # `hard_acute` (objective current-turn danger) always wins.
+        if hard_acute:
+            current.acute_now = True
+        elif self._benign_pivot:
+            current.acute_now = False
+        else:
+            current.acute_now = bool(current.acute_now)
 
         # Carry unresolved risk forward so a single calm message cannot erase a
         # real danger. The retention factor depends on whether the user has given
@@ -747,8 +984,26 @@ class ConversationRiskReasoner:
             # sustained reassurance to resolve.
             # Leaving a physical hazard ("I came inside") is concrete and
             # verifiable, so physical danger is allowed to release faster.
-            retain = 0.72 if self._reassured else 0.90
-            retain_pd = 0.50 if self._reassured else 0.88
+            #
+            # Three regimes, strongest evidence wins:
+            #  * explicit reassurance ("I'm safe now")  -> fastest release
+            #  * benign pivot (no acute signal this turn) -> fast release, so a
+            #    single trigger cannot latch the conversation into crisis when
+            #    the user has plainly moved on to another topic
+            #  * otherwise (turn still shows or continues risk) -> hold firmly
+            if self._reassured:
+                retain, retain_pd = 0.72, 0.50
+            elif self._benign_pivot:
+                # A benign topic change lets carried risk decay steadily, but a
+                # single calm message must NOT erase a strong prior danger in one
+                # turn (a real hazard reported last turn still deserves a check-in
+                # this turn). Retention is therefore moderate: a strong prior
+                # holds for one more turn and releases over the next few, while
+                # `acute_now` drops immediately so the responder stops replaying
+                # the full emergency script and switches to a warm follow-up.
+                retain, retain_pd = 0.66, 0.68
+            else:
+                retain, retain_pd = 0.90, 0.88
             current.self_harm_score = max(current.self_harm_score,
                                           previous.self_harm_score * retain)
             current.physical_danger_score = max(current.physical_danger_score,

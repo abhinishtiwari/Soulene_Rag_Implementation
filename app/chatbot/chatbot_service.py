@@ -423,30 +423,6 @@ class ChatbotService:
                 strategy.emoji = "none"
         return strategy
 
-    def _ingest_user_turn(self, user_id, session_id, context_id,
-                          message, strategy) -> None:
-        user_message = self._archive(user_id, session_id, "user", message)
-        self.cag.context.append(context_id, "user", message)
-        # Important personal details are often shared during vulnerable moments.
-        if strategy.intent not in (Intent.INJECTION, Intent.HARMFUL, Intent.SEXUAL):
-            try:
-                self.profile.observe(
-                    user_id, message, source_session_id=session_id,
-                    source_message_id=user_message.message_id,
-                )
-            except Exception:
-                log.exception(
-                    "derived memory persistence failed user=%s session=%s",
-                    user_id, session_id,
-                )
-
-    def _ingest_assistant_turn(self, user_id, session_id, context_id, reply) -> None:
-        self._archive(user_id, session_id, "assistant", reply)
-        self.cag.context.append(context_id, "assistant", reply)
-        # This session's content changed, so the cached cross-session view of
-        # this user is now out of date.
-        self.cag.context.invalidate_cross_session(f"{len(user_id)}:{user_id}")
-
     def _lookup(self, user_id: str, message: str, strategy: ResponseStrategy):
         # Knowledge is available for info questions even if the user is distressed
         # (e.g. "I'm anxious, what breathing exercise helps?") — but never in a crisis.
@@ -527,12 +503,12 @@ class ChatbotService:
             lookup = self._lookup(user_id, message, strategy)
         if lookup.cached_answer:
             reply = self._finalize_reply(
-                session_id, message, lookup.cached_answer, strategy)
+                session_id, message, lookup.cached_answer, strategy, lookup)
             return Route.SUPPORT, reply, lookup
 
         reply = self._generate(
             session_id, user_id, context_id, message, strategy, lookup)
-        reply = self._finalize_reply(session_id, message, reply, strategy)
+        reply = self._finalize_reply(session_id, message, reply, strategy, lookup)
         reply = self._apply_relational_boundary(
             context_id, message, reply, strategy)
         return Route.SUPPORT, reply, lookup
@@ -556,11 +532,17 @@ class ChatbotService:
         return reply
 
     def _finalize_reply(self, session_id: str, message: str, reply: str,
-                        strategy: ResponseStrategy) -> str:
+                        strategy: ResponseStrategy, lookup=None) -> str:
+        # On a document-grounded turn, hand the retrieved source to the Guardian
+        # so it can verify the reply is grounded in it (no invented facts).
+        knowledge_context = None
+        if lookup is not None:
+            knowledge_context = getattr(lookup, "knowledge_context", "") or None
         reply = self.response_builder.apply_output_safety(
             session_id=session_id, user_message=message, reply=reply,
             language=strategy.language,
-            risk_assessment=strategy.risk_assessment)
+            risk_assessment=strategy.risk_assessment,
+            knowledge_context=knowledge_context)
         return self._enforce_reply_policy(reply, strategy)
 
     def _enforce_reply_policy(self, reply: str, strategy: ResponseStrategy) -> str:
@@ -889,9 +871,7 @@ class ChatbotService:
                 return ModerationSignal()
         return ModerationSignal()
 
-    def _archive(self, user_id, conversation_id, role, content):
-        """Legacy single-message write; durable errors intentionally propagate."""
-        return self.archive.record(user_id, conversation_id, role, content)
+
 
     @staticmethod
     def _context_id(user_id: str, session_id: str) -> str:
@@ -988,6 +968,7 @@ def build_chatbot(settings: Optional[Settings] = None, *, client: Optional[LLMCl
         token_budget=settings.knowledge_token_budget,
         context_cache_size=settings.context_cache_size,
         prompt_window=settings.prompt_window,
+        include_types=settings.knowledge_include_type_set,
     )
     if warm_cache:
         try:

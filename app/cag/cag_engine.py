@@ -39,8 +39,11 @@ class CAGEngine:
                  token_budget: int = 12000,
                  context_cache_size: int = 100,
                  prompt_window: int = 20,
-                 response_cache_entries: int = 500):
-        self.knowledge = KnowledgeCache(knowledge_dir, cache_dir, token_budget=token_budget)
+                 response_cache_entries: int = 500,
+                 include_types=None):
+        self.knowledge = KnowledgeCache(knowledge_dir, cache_dir,
+                                        token_budget=token_budget,
+                                        include_types=include_types)
         self.responses = ResponseCache(max_entries=response_cache_entries)
         self.context = ContextCache(cache_size=context_cache_size, prompt_window=prompt_window)
         self._lock = threading.RLock()

@@ -24,7 +24,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, Iterable, List, Optional, Tuple
 
 from app.cag.document_processor import SUPPORTED_EXTENSIONS, Section, process_document
 from app.safety.guardrails import Guardrails
@@ -107,10 +107,19 @@ class KnowledgeCache:
     CACHE_VERSION = 2
 
     def __init__(self, knowledge_dir: Path, cache_dir: Path,
-                 token_budget: int = 12000):
+                 token_budget: int = 12000,
+                 include_types: Optional[Iterable[str]] = None):
         self.knowledge_dir = Path(knowledge_dir)
         self.cache_dir = Path(cache_dir)
         self.token_budget = token_budget
+        # Retrieval is scoped to these top-level knowledge folders. Documents in
+        # any other folder (e.g. a large clinical `books/` reference library) are
+        # left on disk but never indexed or retrieved, so they cannot bloat the
+        # corpus past the preload budget or leak diagnostic/clinical framing into
+        # a companion reply. None means "index everything" (legacy behaviour).
+        self.include_types: Optional[set] = (
+            {t.strip() for t in include_types if t and t.strip()}
+            if include_types is not None else None)
         self._lock = threading.RLock()
 
         self._sections: List[CachedSection] = []
@@ -121,6 +130,30 @@ class KnowledgeCache:
         self._built_at: float = 0.0
         # Rendered full-corpus context, computed once and reused.
         self._full_context: Optional[str] = None
+
+    # ------------------------------------------------------------------
+    # Scope helpers
+    # ------------------------------------------------------------------
+    def _type_of(self, path: Path) -> str:
+        """The knowledge_type for a file: its top-level folder under the root.
+
+        A file placed directly in the root (no subfolder) is "general".
+        """
+        try:
+            ktype = path.relative_to(self.knowledge_dir).parts[0]
+            return "general" if ktype == path.name else ktype
+        except Exception:
+            return "general"
+
+    def _is_included(self, path: Path) -> bool:
+        """Whether a file is in scope for indexing/retrieval.
+
+        When `include_types` is set, only files whose top-level folder is in that
+        set are indexed; everything else is ignored (left on disk, never read).
+        """
+        if self.include_types is None:
+            return True
+        return self._type_of(path) in self.include_types
 
     # ------------------------------------------------------------------
     # Properties / stats
@@ -174,7 +207,8 @@ class KnowledgeCache:
             return None  # unknown future version: rebuild rather than guess
         by_basename: Dict[str, List[str]] = {}
         for path in self.knowledge_dir.rglob("*"):
-            if path.is_file() and path.suffix.lower() in SUPPORTED_EXTENSIONS:
+            if (path.is_file() and path.suffix.lower() in SUPPORTED_EXTENSIONS
+                    and self._is_included(path)):
                 by_basename.setdefault(path.name, []).append(self._relative_path(path))
 
         remap = {name: paths[0] for name, paths in by_basename.items()
@@ -309,6 +343,10 @@ class KnowledgeCache:
         for path in sorted(self.knowledge_dir.rglob("*")):
             if not (path.is_file() and path.suffix.lower() in SUPPORTED_EXTENSIONS):
                 continue
+            # Out-of-scope folders (e.g. the clinical `books/` library) are
+            # skipped: left on disk, never indexed or retrieved.
+            if not self._is_included(path):
+                continue
             h = hashlib.sha256()
             try:
                 with path.open("rb") as f:
@@ -316,13 +354,7 @@ class KnowledgeCache:
                         h.update(block)
             except OSError:
                 continue
-            try:
-                knowledge_type = path.relative_to(self.knowledge_dir).parts[0]
-                if knowledge_type == path.name:
-                    knowledge_type = "general"
-            except Exception:
-                knowledge_type = "general"
-            found[self._relative_path(path)] = (path, h.hexdigest(), knowledge_type)
+            found[self._relative_path(path)] = (path, h.hexdigest(), self._type_of(path))
         return found
 
     def refresh(self, *, force: bool = False) -> dict:

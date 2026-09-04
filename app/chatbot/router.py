@@ -18,12 +18,31 @@ import re
 from app.types import KnowledgeType, SafetyDecision
 
 # --- Soulene product signals ---
-_SOULENE_NAME = re.compile(r"\bsoulene\b", re.I)
+# Names of the entities our own knowledge documents describe: the product
+# (Soulene) and the company behind it (S3 Cubes Innovations), which has its own
+# document in knowledge/soulene/. These are entity ALIASES — the lookup key for
+# "this question is about us" — not an attempt to guess intent from vocabulary.
+# Without the company alias, "what is S3 Cubes" retrieved nothing and the model
+# answered from its own knowledge instead of the document.
+_SOULENE_NAME = re.compile(r"\bsoulene\b|\bs3\s*cubes?\b", re.I)
 # Definitional / explanatory question about the product itself. Only meaningful
 # when the message also names Soulene (checked by the caller).
 _SOULENE_DEFINITIONAL = re.compile(
-    r"\b(what\s+is|what'?s|what\s+are|who\s+is|tell me about|about|explain"
-    r"|how\s+does|how\s+do|how\s+can|what\s+can|what\s+does)\b", re.I)
+    # NOTE: every alternative here is only consulted when the message already
+    # names Soulene / S3 Cubes, so bare verbs like "tell me" cannot over-trigger
+    # on unrelated chat. "tell me soulene" (no "about") is a very common phrasing
+    # that previously fell through to small talk.
+    r"\b(what\s+is|what'?s|what\s+are|who\s+is|tell\s+me|about|explain"
+    r"|how\s+does|how\s+do|how\s+can|what\s+can|what\s+does"
+    # Ownership / origin questions are product questions too ("who built
+    # soulene", "who's behind S3 Cubes"). Bare/uninflected forms are included on
+    # purpose: users type "who build soulene" and "who develop soulene" far more
+    # often than the grammatical form, and missing those sent the turn to small
+    # talk with no document at all.
+    r"|who\s+(?:build|built|make|made|own|owns|run|runs|create|created"
+    r"|found|founded|develop|develops|developed)"
+    r"|which\s+company|how\s+many\s+(?:members|people|employees)"
+    r"|behind|know\s+about|heard\s+of)\b", re.I)
 # ISS-08 FIX: Narrowed product keywords — removed overly broad terms like
 # "plan", "school", "college", "sport" that frequently appear in emotional
 # conversations. These only trigger Soulene routing when "soulene" is present.

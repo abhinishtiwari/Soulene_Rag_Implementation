@@ -104,6 +104,26 @@ class RiskAssessment:
     # Who the danger concerns: "self" (the user), "other" (someone they're
     # worried about), or "unclear". Defaults to "self" (conservative).
     risk_subject: str = "self"
+    # Meaning-based scope of the request for Soulene's allowlist: "in_scope"
+    # (mental wellbeing, emotional support, coping, self-reflection, feelings,
+    # everyday/day-to-day life conversation), "out_of_scope" (coding/technical,
+    # general-assistant tasks, unrelated trivia), or "unclear". Drives the
+    # off-topic decision when present; the keyword detector is the fallback.
+    scope: str = "unclear"
+    # Meaning-based judgement of whether answering needs Soulene's own reference
+    # material: "soulene" (product/service/platform facts), "mental_health"
+    # (informational mental-health question or an exercise/technique from the
+    # material), "none" (ordinary conversation or emotional support needs no
+    # lookup), or "unclear". Drives CAG routing when present; the keyword
+    # `classify_knowledge` router is the fallback.
+    knowledge_need: str = "unclear"
+    # Meaning-based recognition of two specific asks whose handling is
+    # deterministic and must not depend on exact wording: "helpline" (they want
+    # an emergency/crisis number — answered from config, never model-generated)
+    # and "identity" (who/what Soulene AI is). "none" otherwise. This is ADDITIVE
+    # to the keyword detectors, which stay always-on: it can only add a detection,
+    # never suppress one.
+    request_kind: str = "none"
 
     def to_dict(self) -> Dict[str, object]:
         data = dict(self.__dict__)

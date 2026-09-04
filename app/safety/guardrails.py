@@ -16,14 +16,34 @@ from app.types import Language, ModerationSignal, ResponseMode, Route, SafetyDec
 
 
 class Guardrails:
+    # Self-directed action forms. Defined here, before first use, because
+    # detection and the ISSUE-006 defusing patterns below MUST share one
+    # definition.
+    #
+    # ISSUE-042: they did not. The defusing patterns were written
+    # morphology-aware (`hurt(?:ing)?\s+my\s?self`), while this detector kept a
+    # flat list of surface forms that included `hurt myself` but not `hurting
+    # myself`. The result was a floor that could defuse a form it could not
+    # detect: "I have been thinking about hurting myself" assessed SAFE and was
+    # answered as ordinary support whenever moderation and the semantic
+    # classifier were unavailable -- exactly the degraded state this floor exists
+    # to cover. Composing both from one constant is what stops them drifting
+    # again; adding the missing strings to two places would not.
+    _SELF_HARM_ACTION = (
+        r"(?:kill(?:ing)?\s+my\s?self|end(?:ing)?\s+my\s+life"
+        r"|tak(?:e|ing)\s+my\s+(?:own\s+)?life|commit(?:ting)?\s+suicide|suicide"
+        r"|harm(?:ing)?\s+my\s?self|hurt(?:ing)?\s+my\s?self|cut(?:ting)?\s+my\s?self"
+        r"|unalive\s+my\s?self|hang(?:ing)?\s+my\s?self)"
+    )
+
     # --- crisis / self-harm ---
     _self_harm = re.compile(
-        r"(want to die|wanna die|kill myself|killing myself|end my life|ending my life"
-        r"|suicide|suicidal|hurt myself|harm myself|don'?t want to live|dont want to live"
-        r"|cut myself|cutting myself|hang myself|overdose"
+        "(" + _SELF_HARM_ACTION
+        + r"|want to die|wanna die|suicidal"
+        r"|don'?t want to live|dont want to live|overdose"
         # common euphemisms / community slang used to dodge filters
-        r"|unalive myself|unalive me|end it all|end things|off myself|do myself in"
-        r"|take my own life|not want to be alive|no longer want to be here"
+        r"|unalive me|end it all|end things|off myself|do myself in"
+        r"|not want to be alive|no longer want to be here"
         r"|\bkms\b|\bsewerslide\b|delete myself"
         # Hindi / Hinglish
         r"|marna chahta|marna chahti|khud ko maar|jaan dena|jaan de dun|khatam kar dun"
@@ -38,8 +58,8 @@ class Guardrails:
 
     # --- distress / emotional ---
     _distress = re.compile(
-        r"\b(overwhelmed|anxious|anxiety|stressed|stress|burned out|burnout|drained|tired"
-        r"|exhausted|alone|lonely|hopeless|numb|crying|hurt|heavy|frustrated|sad|depressed"
+        r"\b(overwhelmed|overwhelming|anxious|anxiety|stress(?:ed|ing|ful)?|burned out|burnout|drained|tired"
+        r"|exhausted|alone|lonely|hopeless|numb|crying|hurt|heavy|frustrated|frustrating|sad|depressed"
         r"|thak gaya|thak gayi|pareshan|akela|udaas|tension|ghabrahat"
         # understated phrasings people actually use
         r"|mood (?:is|isn'?t|is not|not) (?:good|great|okay|ok|fine)"
@@ -53,8 +73,10 @@ class Guardrails:
     _code_block = re.compile(r"```|Traceback \(most recent call last\)", re.M)
     _programming_terms = re.compile(
         r"\b(coding|code|codes|debug(?:ging)?|traceback|stack trace|python|java(script)?|c\+\+|c#"
-        r"|sql|html|css|react|node(?:\.?js)?|algorithm|compile|runtime|syntax error"
-        r"|script|snippet|program|programming|regex|api call|function call)\b",
+        r"|sql|html|css|react|node(?:\.?js)?|algorithm|algorithms|pseudo\s?code|compile|runtime|syntax error"
+        r"|script|snippet|program|programming|regex|api call|function call"
+        r"|data ?structure|time complexity|big[- ]?o|json|xml|yaml|typescript|golang|kotlin|swift"
+        r"|recursion|iterate|iteration|boolean|integer)\b",
         re.I,
     )
     # Request-shaped phrasing, kept deliberately generic so a boundary cannot be
@@ -65,13 +87,30 @@ class Guardrails:
         r"|not working|compile|run this code|explain this code"
         # generic task requests
         r"|write (?:it|this|that|me|one|some)\b|(?:you|u) (?:need to|have to|should|must) write"
-        r"|give me (?:the|a|some|that)?\s*(?:code|script|program|snippet|solution)"
+        r"|give me (?:the|a|an|some|that)?\s*(?:code|script|program|snippet|solution"
+        r"|algorithm|pseudo\s?code|logic|steps?|approach|idea|outline|flow(?:chart)?)"
         r"|send me (?:the|a)?\s*(?:code|script|program)"
+        # "in <format>" / "in code format" phrasings used to reword the same ask
+        r"|in (?:json|xml|yaml|code|python|java|sql)\s*(?:format|form)?\b"
+        r"|(?:the )?(?:algorithm|pseudo\s?code|logic|steps?|approach|idea) (?:for|to|of)\b"
         r"|(?:can|could|would|will) (?:you|u) (?:please )?(?:write|make|create|build|generate|code|do)"
         r"|(?:just )?(?:make|create|generate|build|code) (?:it|this|that|me|one)\b"
         r"|do it for me|write it for me|make it for me|need the code|want the code"
         r"|help me (?:write|code|build|make))\b",
         re.I,
+    )
+    # A bare request verb ("give me", "show me", "explain", "just do") used to
+    # ask for a named CS exercise or a standalone algorithm/logic, even when no
+    # code noun follows. This is what catches "just give me binary search" and
+    # "give the algorithm in a code format" that the noun-anchored pattern above
+    # deliberately leaves out to avoid false positives on ordinary wording.
+    _request_verb = re.compile(
+        r"\b(?:give|show|send|tell|explain|write|make|build|generate|create|code|do|need|want|provide)\b"
+        r"(?:\s+(?:me|it|this|that|the|a|an|some|one|us))*",
+        re.I,
+    )
+    _bare_algorithm = re.compile(
+        r"\b(algorithm|pseudo\s?code|flow ?chart)\b", re.I,
     )
 
     # --- harmful / illegal ---
@@ -84,8 +123,13 @@ class Guardrails:
         r"(मार दूं|मार दूँ|हत्या|क़त्ल|कत्ल|जान से मार|mar dunga|qatl)", re.I,
     )
     _instructional = re.compile(
-        r"\b(how to|how do i|teach me|step by step|steps to|instructions for|guide me"
-        r"|walk me through|show me how|best way to|make a|build a)\b",
+        r"\b(how to|how do i|teach me|step[ -]by[ -]step|steps to|instructions for|guide me"
+        r"|walk me through|show me how|best way to|make a|build a"
+        # A direct request to perform/assist with the act ("help me hack ...",
+        # "can you steal ...") is just as instructional as an explicit "how to".
+        # Without this, a harmful topic phrased as a plain ask slips the gate
+        # whenever the semantic classifier is unavailable.
+        r"|help me|help with|can you|could you|do it|get me)\b",
         re.I,
     )
 
@@ -140,8 +184,14 @@ class Guardrails:
 
     # --- identity / creator questions ---
     _identity_request = re.compile(
-        r"\b(who are you|who are u|who r u|what are you|about you|who made you|who built you"
-        r"|who developed you|who created you|your creator|who owns you|kisne banaya"
+        r"\b(who are you|who are u|who r u|what are you|about you"
+        # Uninflected / SMS forms are deliberate: "who build you", "who develop u",
+        # "who made u" are extremely common and previously matched nothing, so the
+        # turn fell through to small talk with neither the identity directive nor
+        # any knowledge document.
+        r"|who\s+(?:build|built|make|made|develop|develops|developed|create|created|owns?)"
+        r"\s+(?:you|u)\b"
+        r"|your creator|kisne banaya"
         r"|kisne develop|tum kaun ho|aap kaun ho|what is soulene|about soulene"
         r"|soulene kya hai)\b",
         re.I,
@@ -288,8 +338,14 @@ class Guardrails:
         r"|forgetyour(rules?|instructions?)|bypassyour(safety|rules?|filters?))",
         re.I,
     )
+    # Separator-stripped variants, for spaced/obfuscated evasion. Carries the
+    # same inflected forms as _SELF_HARM_ACTION for the same reason (ISSUE-042):
+    # an evader writing "h u r t i n g m y s e l f" must not succeed where
+    # "hurting myself" now fails.
     _COMPACT_SELF_HARM = re.compile(
-        r"(killmyself|endmylife|unalivemyself|hurtmyself|cutmyself|hangmyself"
+        r"(killmyself|killingmyself|endmylife|endingmylife|unalivemyself"
+        r"|hurtmyself|hurtingmyself|harmmyself|harmingmyself"
+        r"|cutmyself|cuttingmyself|hangmyself|hangingmyself"
         r"|wanttodie|endital{1,2}|offmyself|\bkms\b)",
         re.I,
     )
@@ -305,12 +361,8 @@ class Guardrails:
     # an intervening verb such as "don't think I can stop myself from ...")
     # keeps the conservative crisis route.
     # ------------------------------------------------------------------
-    _SELF_HARM_ACTION = (
-        r"(?:kill(?:ing)?\s+my\s?self|end(?:ing)?\s+my\s+life"
-        r"|tak(?:e|ing)\s+my\s+(?:own\s+)?life|commit(?:ting)?\s+suicide|suicide"
-        r"|harm(?:ing)?\s+my\s?self|hurt(?:ing)?\s+my\s?self|cut(?:ting)?\s+my\s?self"
-        r"|unalive\s+my\s?self|hang(?:ing)?\s+my\s?self)"
-    )
+    # `_SELF_HARM_ACTION` is defined above, next to `_self_harm`, so detection
+    # and defusing are composed from the same constant (ISSUE-042).
     # Negation must directly govern an intent verb, which then governs the action.
     _NEGATED_SELF_HARM = re.compile(
         r"\b(?:do not|don'?t|dont|did not|didn'?t|will not|won'?t|would not|wouldn'?t"
@@ -549,7 +601,16 @@ class Guardrails:
         # A medication ask is an in-domain wellbeing concern, never "off topic".
         if self.is_medical_request(message):
             return False
-        if self._is_programming_request((message or "").lower()):
+        lowered = (message or "").lower()
+        # Talking about coding WITH distress ("this code is stressing me out") is
+        # an emotional conversation, not a request for technical help — keep it in
+        # domain so the companion supports the feeling. This carve-out applies to
+        # the generic off-topic pattern too, not just the programming detector,
+        # so the coding sub-pattern of _off_topic can't drag an upset user out.
+        if (self._match(self._programming_terms, message)
+                and self._match(self._distress, message)):
+            return False
+        if self._is_programming_request(lowered):
             return True
         return self._match(self._off_topic, message)
 
@@ -624,6 +685,17 @@ class Guardrails:
         """True = hard refuse. False = ask one clarifying question instead."""
         return self.restricted_confidence(kind, message, moderation) > self.RESTRICTED_CONFIDENCE_THRESHOLD
 
+    # Classic CS/programming exercises people ask for by name. On their own these
+    # are ambiguous, but paired with a request verb ("give me ... binary search")
+    # they are unmistakably a coding ask even when the word "code" never appears.
+    _cs_topic = re.compile(
+        r"\b(fibonacci|binary search|bubble sort|merge sort|quick ?sort|insertion sort"
+        r"|selection sort|linked list|hash ?map|hash ?table|stack|queue|graph traversal"
+        r"|breadth[- ]first|depth[- ]first|\bbfs\b|\bdfs\b|dynamic programming"
+        r"|factorial|prime numbers?|palindrome|dijkstra|two sum|fizzbuzz)\b",
+        re.I,
+    )
+
     def _is_programming_request(self, lowered: str) -> bool:
         if self._code_block.search(lowered):
             return True
@@ -631,7 +703,18 @@ class Guardrails:
         # programming terms + instruction pattern BUT NO emotional keywords.
         # If any distress/emotion is present, it's an emotional conversation
         # about code — not a request for code help.
-        if self._programming_terms.search(lowered) and self._programming_intent.search(lowered):
+        has_intent = bool(self._programming_intent.search(lowered))
+        has_request_verb = bool(self._request_verb.search(lowered))
+        is_coding = bool(
+            (self._programming_terms.search(lowered) and has_intent)
+            # A named CS exercise + a request verb is a coding ask even without
+            # the words "code"/"algorithm" (e.g. "just give me binary search").
+            or (self._cs_topic.search(lowered) and (has_intent or has_request_verb))
+            # A standalone "give/show the algorithm/logic/pseudocode/steps" ask,
+            # however it is worded (e.g. "give the algorithm in a code format").
+            or (self._bare_algorithm.search(lowered) and has_request_verb)
+        )
+        if is_coding:
             if self._distress.search(lowered):
                 return False  # "my python assignment is stressing me out" = in-domain
             return True
