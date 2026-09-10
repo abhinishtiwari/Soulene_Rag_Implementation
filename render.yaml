@@ -149,7 +149,15 @@ services:
       - key: DB_NAME
         value: soulene
       - key: IDENTITY_SECRET
-        generateValue: true         # stable signed identity across all workers
+        # Set ONCE, by hand, in the Render dashboard (>= 32 characters) and then
+        # never change it. This secret signs every user's identity cookie, so if
+        # it changes, every outstanding cookie fails verification and users are
+        # silently logged out (and lose the history keyed to that identity).
+        # `generateValue: true` was WRONG here precisely because Render can
+        # regenerate that value on a blueprint re-sync, which is what produced
+        # the `{"error":"invalid identity"}` page. `sync: false` keeps the value
+        # dashboard-managed, out of git, and STABLE across deploys.
+        sync: false
       - key: SECURE_IDENTITY_COOKIE
         value: "true"
       - key: PYTHONUNBUFFERED

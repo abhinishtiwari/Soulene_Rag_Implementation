@@ -806,6 +806,49 @@ class IdempotencyAndSecondaryWorkTests(unittest.TestCase):
             self.service.archive.count(identity["user_id"], identity["session_id"]), 4
         )
 
+    def test_stale_identity_cookie_recovers_on_home_page(self):
+        """A cookie signed by an old IDENTITY_SECRET must not brick the app.
+
+        When IDENTITY_SECRET changes (e.g. a regenerated Render secret) every
+        previously issued cookie fails verification. Loading `/` with such a
+        cookie should transparently mint a fresh identity (HTTP 200) and replace
+        the bad cookie, rather than returning the 401 `invalid identity` page.
+        """
+        import main
+        main._service = self.service
+        main._feedback = FeedbackStore(Path(self.temp.name) / "feedback.sqlite3")
+        old_secret = IdentityManager("old-secret-that-is-definitely-32-bytes-long")
+        main._identity = IdentityManager("new-secret-that-is-definitely-32-bytes-long")
+        main.app.config.update(TESTING=True)
+        client = main.app.test_client()
+
+        # A cookie the current secret cannot verify.
+        stale_token = old_secret.issue().token
+        client.set_cookie(main._identity.COOKIE_NAME, stale_token)
+
+        home = client.get("/")
+        self.assertEqual(home.status_code, 200, home.get_data(as_text=True))
+        # A replacement cookie was issued.
+        set_cookie = home.headers.get("Set-Cookie", "")
+        self.assertIn(main._identity.COOKIE_NAME, set_cookie)
+
+    def test_stale_identity_cookie_still_rejected_on_protected_api(self):
+        """A forged/stale token on a protected API path is still a hard 401."""
+        import main
+        main._service = self.service
+        main._feedback = FeedbackStore(Path(self.temp.name) / "feedback.sqlite3")
+        old_secret = IdentityManager("old-secret-that-is-definitely-32-bytes-long")
+        main._identity = IdentityManager("new-secret-that-is-definitely-32-bytes-long")
+        main.app.config.update(TESTING=True)
+        client = main.app.test_client()
+
+        stale_token = old_secret.issue().token
+        response = client.post(
+            "/chat", json={"message": "hi"},
+            headers={"X-Soulene-Identity": stale_token})
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.get_json()["error"], "invalid identity")
+
     def test_explicit_key_replay_validates_payload(self):
         self.service.handle("session", "first", user_id="user", request_id="fixed")
         with self.assertRaisesRegex(ValueError, "different message"):

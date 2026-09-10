@@ -342,7 +342,20 @@ def _guard_request():
     try:
         g.principal = _identity.from_request(request.headers, request.cookies)
     except InvalidIdentity:
-        return jsonify({"error": "invalid identity"}), 401
+        # A stale/forged token must not turn the app's own entry point into a
+        # dead 401. This happens routinely when IDENTITY_SECRET changes (e.g. a
+        # Render `generateValue` secret being regenerated): every previously
+        # issued cookie then fails HMAC verification. On an OPEN browser path we
+        # treat that exactly like "no cookie was presented" -- discard the bad
+        # one and mint a fresh identity so the visitor simply gets a new session
+        # instead of a broken page. On protected API paths a bad token is still
+        # a hard 401, because there a forged token is a security signal, not a
+        # first visit.
+        if request.path in _OPEN_PATHS and request.method in ("GET", "HEAD"):
+            g.principal = _identity.issue()
+            g.identity_was_reset = True
+        else:
+            return jsonify({"error": "invalid identity"}), 401
 
     # A newly minted identity means the caller presented none, so it is charged
     # to the network bucket. Callers that keep their identity are unaffected.
